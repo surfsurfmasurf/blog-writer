@@ -1,19 +1,16 @@
 """
 Image Bot (image_bot.py)
-Role: Image generation/management for cartoon section
+Role: Generate featured images for all blog articles using Gemini Imagen API.
+Also manages editorial cartoon images for QuickTake section.
 
-IMAGE_MODE environment variable selects the mode:
-
+IMAGE_MODE environment variable selects the mode for QuickTake cartoons:
   manual  (default) — Sends 1 prompt via Telegram at article publish time.
-                      User generates the image and saves the file to data/images/.
+  request          — Batch prompts via Telegram for manual generation.
+  auto             — OpenAI DALL-E 3 API auto-generation (requires OPENAI_API_KEY).
 
-  request          — Scheduler periodically sends pending prompt list via Telegram.
-                     User creates image with generative AI and sends it via Telegram for auto-save.
-                     /images command to check pending list, /imgpick [number] to select.
-
-  auto             — Direct OpenAI Images API (dall-e-3) call. Requires OPENAI_API_KEY.
-                     Cost: $0.04-0.08 per image (separate from ChatGPT Pro subscription).
+Featured images for regular articles always use Gemini Imagen (no extra API key needed).
 """
+import base64
 import json
 import logging
 import os
@@ -49,7 +46,8 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-IMAGE_MODE = os.getenv('IMAGE_MODE', 'manual').lower()  # manual | request | auto
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
+IMAGE_MODE = os.getenv('IMAGE_MODE', 'manual').lower()
 
 
 # --- Telegram Send --------------------------------------------------
@@ -70,16 +68,108 @@ def send_telegram(text: str):
         logger.error(f"Telegram send failed: {e}")
 
 
-# --- Prompt Generation -----------------------------------------------
+# --- Featured Image Generation (Gemini Imagen) -----------------------
+
+def generate_featured_image(title: str, description: str = '', tags: list = None) -> str | None:
+    """
+    Generate a featured/hero image for a blog article using Gemini Imagen.
+    Returns: local file path to saved image, or None on failure.
+    """
+    if not GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY not set — skipping image generation")
+        return None
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=GEMINI_API_KEY)
+
+        # Build a prompt for a clean, professional tech blog featured image
+        tags_str = ', '.join(tags[:3]) if tags else ''
+        prompt = (
+            f"A clean, modern, professional blog featured image for a tech article. "
+            f"Topic: {title}. "
+            f"{f'Keywords: {tags_str}. ' if tags_str else ''}"
+            f"Style: minimalist flat illustration, subtle gradients, tech-themed, "
+            f"abstract geometric shapes, muted professional color palette (blues, grays, whites), "
+            f"no text, no watermarks, suitable as a blog header image. "
+            f"Aspect ratio 16:9, high quality."
+        )
+
+        response = client.models.generate_images(
+            model='imagen-3.0-generate-002',
+            prompt=prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+                aspect_ratio='16:9',
+                safety_filter_level='BLOCK_ONLY_HIGH',
+            ),
+        )
+
+        if response.generated_images:
+            image_data = response.generated_images[0].image.image_bytes
+            safe_name = re.sub(r'[^\w\-]', '_', title)[:50]
+            filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}.png"
+            save_path = IMAGES_DIR / filename
+            save_path.write_bytes(image_data)
+            logger.info(f"Featured image generated: {save_path}")
+            return str(save_path)
+        else:
+            logger.warning("Imagen returned no images")
+            return None
+
+    except Exception as e:
+        logger.warning(f"Featured image generation failed: {e}")
+        return None
+
+
+def upload_image_to_blogger(image_path: str) -> str | None:
+    """
+    Upload image to a free hosting service and return the public URL.
+    Uses imgbb.com free tier (no API key needed for anonymous uploads).
+    Falls back to base64 data URI if upload fails.
+    """
+    try:
+        with open(image_path, 'rb') as f:
+            image_data = f.read()
+
+        # Try imgbb free upload (anonymous, no API key)
+        resp = requests.post(
+            'https://api.imgbb.com/1/upload',
+            params={'key': '00000000000000000000000000000000'},  # anonymous
+            files={'image': image_data},
+            timeout=30,
+        )
+        if resp.status_code == 200 and resp.json().get('success'):
+            url = resp.json()['data']['url']
+            logger.info(f"Image uploaded: {url}")
+            return url
+    except Exception as e:
+        logger.debug(f"imgbb upload failed: {e}")
+
+    # Fallback: base64 data URI (works in most blog platforms)
+    try:
+        with open(image_path, 'rb') as f:
+            b64 = base64.b64encode(f.read()).decode()
+        data_uri = f"data:image/png;base64,{b64}"
+        logger.info("Using base64 data URI for image")
+        return data_uri
+    except Exception as e:
+        logger.warning(f"Image encoding failed: {e}")
+        return None
+
+
+# --- Cartoon Prompt Generation ----------------------------------------
 
 def build_cartoon_prompt(topic: str, description: str = '') -> str:
     """Generate cartoon-style image prompt (generic — usable with any generative AI)"""
     desc_part = f" {description}" if description else ""
     prompt = (
-        f"Korean editorial cartoon style, single panel.{desc_part} "
+        f"Editorial cartoon style, single panel.{desc_part} "
         f"Topic: {topic}. "
         f"Style: simple line art, expressive characters, thought-provoking social commentary, "
-        f"Korean newspaper cartoon aesthetic, minimal color, black and white with accent colors. "
+        f"newspaper editorial cartoon aesthetic, minimal color, black and white with accent colors. "
         f"No text in the image. Square format 1:1."
     )
     return prompt
@@ -88,7 +178,6 @@ def build_cartoon_prompt(topic: str, description: str = '') -> str:
 # --- Pending Prompt Management ----------------------------------------
 
 def load_pending_prompts() -> list[dict]:
-    """Load pending_prompts.json"""
     if not PENDING_PROMPTS_FILE.exists():
         return []
     try:
@@ -98,16 +187,13 @@ def load_pending_prompts() -> list[dict]:
 
 
 def save_pending_prompts(prompts: list[dict]):
-    """Save pending_prompts.json"""
     PENDING_PROMPTS_FILE.write_text(
         json.dumps(prompts, ensure_ascii=False, indent=2), encoding='utf-8'
     )
 
 
 def add_pending_prompt(topic: str, description: str, article_ref: str = '') -> dict:
-    """Add new prompt to pending list. Returns the created item."""
     prompts = load_pending_prompts()
-    # Do not add if same topic already exists
     for p in prompts:
         if p['topic'] == topic and p['status'] == 'pending':
             logger.info(f"Prompt already pending: {topic}")
@@ -115,13 +201,13 @@ def add_pending_prompt(topic: str, description: str, article_ref: str = '') -> d
 
     prompt_text = build_cartoon_prompt(topic, description)
     item = {
-        'id': str(len(prompts) + 1),  # Human-readable number
+        'id': str(len(prompts) + 1),
         'uid': uuid.uuid4().hex[:8],
         'topic': topic,
         'description': description,
         'prompt': prompt_text,
         'article_ref': article_ref,
-        'status': 'pending',  # pending | selected | done
+        'status': 'pending',
         'created_at': datetime.now().isoformat(),
         'image_path': '',
     }
@@ -132,12 +218,10 @@ def add_pending_prompt(topic: str, description: str, article_ref: str = '') -> d
 
 
 def get_pending_prompts(status: str = 'pending') -> list[dict]:
-    """Get prompt list by status"""
     return [p for p in load_pending_prompts() if p['status'] == status]
 
 
 def mark_prompt_selected(prompt_id: str) -> dict | None:
-    """Change a user-selected prompt to selected status"""
     prompts = load_pending_prompts()
     for p in prompts:
         if p['id'] == str(prompt_id):
@@ -149,7 +233,6 @@ def mark_prompt_selected(prompt_id: str) -> dict | None:
 
 
 def mark_prompt_done(prompt_id: str, image_path: str) -> dict | None:
-    """Mark prompt as done after image received"""
     prompts = load_pending_prompts()
     for p in prompts:
         if p['id'] == str(prompt_id):
@@ -172,7 +255,6 @@ def get_prompt_by_id(prompt_id: str) -> dict | None:
 # --- Image Receive and Save ------------------------------------------
 
 def save_image_from_bytes(image_bytes: bytes, topic: str, prompt_id: str) -> str:
-    """Save image received as bytes to data/images/. Returns path."""
     safe_name = re.sub(r'[^\w\-]', '_', topic)[:50]
     filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_p{prompt_id}_{safe_name}.png"
     save_path = IMAGES_DIR / filename
@@ -182,33 +264,24 @@ def save_image_from_bytes(image_bytes: bytes, topic: str, prompt_id: str) -> str
 
 
 def save_image_from_telegram(file_bytes: bytes, prompt_id: str) -> str | None:
-    """Save image received from Telegram and mark prompt as done"""
     prompt = get_prompt_by_id(prompt_id)
     if not prompt:
         logger.warning(f"Prompt #{prompt_id} not found")
         return None
-
     image_path = save_image_from_bytes(file_bytes, prompt['topic'], prompt_id)
     mark_prompt_done(prompt_id, image_path)
     return image_path
 
 
-# --- Request Mode — Batch Send ----------------------------------------
+# --- Batch Send -------------------------------------------------------
 
 def send_prompt_batch():
-    """
-    Request mode periodic execution.
-    Scans cartoon section topics from data/topics/, adds them to the prompt pending list,
-    and sends all currently pending prompts via Telegram.
-    """
     logger.info("=== Image prompt batch send started ===")
-
-    # Scan cartoon topics -> add to pending list
     topics_dir = DATA_DIR / 'topics'
     for f in sorted(topics_dir.glob('*.json')):
         try:
             data = json.loads(f.read_text(encoding='utf-8'))
-            if data.get('corner') == 'cartoon':
+            if data.get('corner') == 'QuickTake':
                 add_pending_prompt(
                     topic=data.get('topic', ''),
                     description=data.get('description', ''),
@@ -228,9 +301,7 @@ def send_prompt_batch():
 
     lines = [
         f"<b>[Image Production Request — {len(active)} items]</b>\n",
-        "Please select an item from the list below to produce.\n",
-        f"Select with /imgpick [number] -> Create with generative AI (Midjourney, DALL-E, Stable Diffusion, etc.) -> "
-        f"Send the image in this chat.\n",
+        "Select with /imgpick [number] -> Generate -> Send image in chat.\n",
     ]
     for item in active:
         status_icon = '[In Progress]' if item['status'] == 'selected' else '[Pending]'
@@ -239,37 +310,33 @@ def send_prompt_batch():
             f"   <code>{item['prompt'][:200]}...</code>\n"
         )
     lines.append("\n/images — Refresh full list")
-
     send_telegram('\n'.join(lines))
     logger.info(f"Batch send complete: {len(active)} items")
 
 
 def send_single_prompt(prompt_id: str):
-    """Send a single prompt with full details via Telegram"""
     prompt = get_prompt_by_id(prompt_id)
     if not prompt:
         send_telegram(f"Prompt #{prompt_id} not found.")
         return
-
     mark_prompt_selected(prompt_id)
     msg = (
         f"<b>[Image Production — #{prompt['id']}]</b>\n\n"
         f"Topic: <b>{prompt['topic']}</b>\n\n"
-        f"Prompt (copy and paste into your generative AI):\n\n"
-        f"<code>{prompt['prompt']}</code>\n\n"
-        f"Once the image is ready, <b>send it in this chat</b> and it will be saved automatically.\n"
-        f"(Please include <code>#{prompt['id']}</code> in the caption when sending)"
+        f"Prompt:\n<code>{prompt['prompt']}</code>\n\n"
+        f"Send the generated image in this chat.\n"
+        f"(Include <code>#{prompt['id']}</code> in the caption)"
     )
     send_telegram(msg)
     logger.info(f"Single prompt sent #{prompt_id}: {prompt['topic']}")
 
 
-# --- Auto Mode -------------------------------------------------------
+# --- Auto Mode (DALL-E) -----------------------------------------------
 
-def generate_image_auto(prompt: str, topic: str) -> str | None:
+def generate_image_auto_dalle(prompt: str, topic: str) -> str | None:
     """Auto-generate image via OpenAI DALL-E 3 API"""
     if not OPENAI_API_KEY:
-        logger.error("OPENAI_API_KEY not set — automatic image generation unavailable")
+        logger.error("OPENAI_API_KEY not set — DALL-E unavailable")
         return None
     try:
         resp = requests.post(
@@ -294,17 +361,16 @@ def generate_image_auto(prompt: str, topic: str) -> str | None:
         filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}.png"
         save_path = IMAGES_DIR / filename
         save_path.write_bytes(img_bytes)
-        logger.info(f"Auto image saved: {save_path}")
+        logger.info(f"DALL-E image saved: {save_path}")
         return str(save_path)
     except Exception as e:
-        logger.error(f"Auto image generation failed: {e}")
+        logger.error(f"DALL-E image generation failed: {e}")
         return None
 
 
-# --- Manual Mode -----------------------------------------------------
+# --- Manual Mode -------------------------------------------------------
 
 def process_manual_mode(topic: str, description: str = '') -> str:
-    """Send 1 prompt via Telegram at article publish time (user saves file manually)"""
     prompt = build_cartoon_prompt(topic, description)
     safe_name = re.sub(r'[^\w\-]', '_', topic)[:50]
     expected_path = IMAGES_DIR / f"{datetime.now().strftime('%Y%m%d')}_{safe_name}.png"
@@ -312,8 +378,7 @@ def process_manual_mode(topic: str, description: str = '') -> str:
         f"<b>[Cartoon Image Request — manual]</b>\n\n"
         f"Topic: <b>{topic}</b>\n\n"
         f"Prompt:\n<code>{prompt}</code>\n\n"
-        f"After generating the image, please save it to the following path:\n"
-        f"<code>{expected_path}</code>"
+        f"Save generated image to:\n<code>{expected_path}</code>"
     )
     logger.info(f"Manual mode prompt sent: {topic}")
     return str(expected_path)
@@ -321,39 +386,47 @@ def process_manual_mode(topic: str, description: str = '') -> str:
 
 # --- Main Entry Point -------------------------------------------------
 
-def process(article: dict) -> str | None:
+def generate_and_get_url(article: dict) -> str | None:
     """
-    Process image for cartoon section articles based on mode.
-    Returns: image path (None in request mode — received asynchronously later)
+    Generate a featured image for ANY article and return a usable URL/data URI.
+    This is the main function called by the publishing pipeline.
     """
-    if article.get('corner') != 'cartoon':
+    title = article.get('title', '')
+    description = article.get('meta', '')
+    tags = article.get('tags', [])
+
+    logger.info(f"Generating featured image for: {title}")
+
+    # Generate image with Gemini Imagen
+    image_path = generate_featured_image(title, description, tags)
+
+    if not image_path:
+        logger.info("Featured image generation skipped or failed")
         return None
 
+    # Get a public URL for the image
+    image_url = upload_image_to_blogger(image_path)
+    return image_url
+
+
+def process_quicktake(article: dict) -> str | None:
+    """Process cartoon image for QuickTake articles (legacy behavior)."""
     topic = article.get('title', '')
     description = article.get('meta', '')
-    logger.info(f"Image bot running: {topic} (mode: {IMAGE_MODE})")
+    logger.info(f"QuickTake image: {topic} (mode: {IMAGE_MODE})")
 
     if IMAGE_MODE == 'auto':
         prompt = build_cartoon_prompt(topic, description)
-        image_path = generate_image_auto(prompt, topic)
+        image_path = generate_image_auto_dalle(prompt, topic)
         if image_path:
             send_telegram(
                 f"<b>[Auto Image Generation Complete]</b>\n\n{topic}\nPath: <code>{image_path}</code>"
             )
         return image_path
-
     elif IMAGE_MODE == 'request':
-        item = add_pending_prompt(topic, description, article_ref=article.get('_source_file', ''))
-        send_telegram(
-            f"<b>[Image Production Request Added]</b>\n\n"
-            f"Topic: <b>{topic}</b>\n"
-            f"Number: <b>#{item['id']}</b>\n\n"
-            f"/imgpick {item['id']} — Get prompt for this topic\n"
-            f"/images — View full pending list"
-        )
-        return None  # Image will be received later via Telegram
-
-    else:  # manual (default)
+        add_pending_prompt(topic, description, article_ref=article.get('_source_file', ''))
+        return None
+    else:
         return process_manual_mode(topic, description)
 
 
@@ -362,5 +435,6 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'batch':
         send_prompt_batch()
     else:
-        sample = {'corner': 'cartoon', 'title': 'Is AI stealing jobs?', 'meta': ''}
-        print(process(sample))
+        sample = {'title': 'Building Microservices with Go', 'meta': 'A guide', 'tags': ['Go', 'microservices']}
+        url = generate_and_get_url(sample)
+        print(f"Image URL: {url}")

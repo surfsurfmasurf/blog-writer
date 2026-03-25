@@ -119,6 +119,24 @@ def step_write(topic_data: dict) -> dict | None:
     return article
 
 
+def step_generate_image(article: dict) -> str | None:
+    """Step 3.5: Generate featured image with Gemini Imagen"""
+    logger.info("=" * 50)
+    logger.info("Step 3.5: Generating featured image")
+    logger.info("=" * 50)
+
+    import image_bot
+    image_url = image_bot.generate_and_get_url(article)
+
+    if image_url:
+        article['featured_image_url'] = image_url
+        logger.info(f"Featured image ready: {image_url[:80]}...")
+    else:
+        logger.info("No featured image generated (continuing without image)")
+
+    return image_url
+
+
 def step_publish(article: dict) -> bool:
     """Step 4: Publish to Blogger"""
     logger.info("=" * 50)
@@ -136,6 +154,18 @@ def step_publish(article: dict) -> bool:
             extensions=['toc', 'tables', 'fenced_code']
         )
         body_html = linker_bot.process(article, body_html)
+
+        # Insert featured image at the top if available
+        featured_url = article.get('featured_image_url')
+        if featured_url:
+            img_html = (
+                f'<div class="featured-image" style="margin-bottom:2em;">'
+                f'<img src="{featured_url}" alt="{article.get("title", "")}" '
+                f'style="width:100%;max-width:800px;height:auto;border-radius:8px;" />'
+                f'</div>\n'
+            )
+            body_html = img_html + body_html
+
         article['body'] = body_html
         article['_body_is_html'] = True
 
@@ -223,6 +253,9 @@ def main():
     if not article:
         logger.error("Article writing failed. Exiting.")
         return
+
+    # Generate featured image
+    step_generate_image(article)
 
     if args.dry_run:
         logger.info("=== Dry-run mode: skipping publishing ===")
