@@ -215,6 +215,9 @@ def _print_article_preview(article: dict):
     body = article.get('body', '')
     print(f"  Body: {len(body)} chars")
     print(f"  Sources: {len(article.get('sources', []))}")
+    kr_summary = article.get('korean_summary', '')
+    if kr_summary:
+        print(f"  Korean Summary: {kr_summary[:120]}...")
     print("=" * 60 + "\n")
 
 

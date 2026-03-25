@@ -192,14 +192,27 @@ def build_json_ld(article: dict, blog_url: str = '') -> str:
 
 
 def build_full_html(article: dict, body_html: str, toc_html: str) -> str:
-    """Assemble final HTML: JSON-LD + table of contents + body + disclaimer"""
+    """Assemble final HTML: JSON-LD + TOC + body + Korean summary + disclaimer"""
     json_ld = build_json_ld(article)
     disclaimer = article.get('disclaimer', '')
+    korean_summary = article.get('korean_summary', '')
 
     html_parts = [json_ld]
     if toc_html:
         html_parts.append(f'<div class="toc-wrapper">{toc_html}</div>')
     html_parts.append(body_html)
+
+    # Korean summary section
+    if korean_summary:
+        html_parts.append(
+            '<hr style="margin:2em 0;border:none;border-top:2px solid #e0e0e0;" />'
+            '<div class="korean-summary" style="background:#f8f9fa;border-left:4px solid #4285f4;'
+            'padding:1.2em 1.5em;margin:1.5em 0;border-radius:0 8px 8px 0;'
+            'font-family:\'Noto Sans KR\',sans-serif;line-height:1.8;">'
+            f'{korean_summary}'
+            '</div>'
+        )
+
     if disclaimer:
         html_parts.append(f'<hr/><p class="disclaimer"><small>{disclaimer}</small></p>')
 

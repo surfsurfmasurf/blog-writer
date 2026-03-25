@@ -202,8 +202,63 @@ def write_article(topic_data: dict) -> dict | None:
     article['quality_score'] = topic_data.get('quality_score', 80)
     article['sources'] = article.get('sources', []) or topic_data.get('sources', [])
 
+    # Generate Korean summary for comment
+    korean_summary = generate_korean_summary(article)
+    if korean_summary:
+        article['korean_summary'] = korean_summary
+
     logger.info(f"Article written successfully: {article.get('title', '')}")
     return article
+
+
+def generate_korean_summary(article: dict) -> str | None:
+    """
+    Generate a Korean summary of the article for posting as a comment.
+    Uses the same Gemini API with a separate prompt.
+    """
+    if not GEMINI_API_KEY:
+        return None
+
+    title = article.get('title', '')
+    body = article.get('body', '')
+
+    # Truncate body to avoid token limits
+    body_truncated = body[:6000] if len(body) > 6000 else body
+
+    prompt = f"""아래 영문 기술 블로그 글의 한국어 요약을 작성해주세요.
+
+## 규칙
+- 한국어로 작성 (영문 기술 용어는 그대로 유지)
+- 3~5개 핵심 포인트를 불릿으로 정리
+- 마지막에 한 줄 요약 추가
+- 전체 분량: 300~500자
+- 톤: 친근하지만 전문적 (~입니다/합니다 체)
+- HTML 태그 사용 가능 (<b>, <br>, <ul>, <li>)
+- 맨 처음에 "📌 <b>한국어 요약</b><br><br>" 로 시작
+
+## 원문 제목
+{title}
+
+## 원문 내용
+{body_truncated}
+"""
+
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.5,
+                max_output_tokens=2048,
+            ),
+        )
+        summary = response.text.strip()
+        logger.info(f"Korean summary generated ({len(summary)} chars)")
+        return summary
+    except Exception as e:
+        logger.warning(f"Korean summary generation failed: {e}")
+        return None
 
 
 def _save_raw_output(topic_data: dict, raw_output: str):
