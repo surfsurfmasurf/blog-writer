@@ -1,8 +1,7 @@
-pytrends
+google-genai
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
-google-generativeai
 python-dotenv
 apscheduler
 requests
@@ -11,3 +10,4 @@ feedparser
 markdown
 python-telegram-bot==20.7
 lxml
+pytrends

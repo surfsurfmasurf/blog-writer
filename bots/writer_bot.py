@@ -8,7 +8,8 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -157,22 +158,19 @@ def generate_article(topic_data: dict) -> str | None:
         logger.error("GEMINI_API_KEY is not set. Check your .env file.")
         return None
 
-    genai.configure(api_key=GEMINI_API_KEY)
-
-    model = genai.GenerativeModel(
-        model_name=GEMINI_MODEL,
-        system_instruction=SYSTEM_PROMPT,
-    )
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
     user_prompt = build_user_prompt(topic_data)
     logger.info(f"Requesting article from Gemini: {topic_data.get('topic', '')}")
 
     try:
-        response = model.generate_content(
-            user_prompt,
-            generation_config=genai.types.GenerationConfig(
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
                 temperature=0.7,
-                max_output_tokens=4096,
+                max_output_tokens=8192,
             ),
         )
         output = response.text

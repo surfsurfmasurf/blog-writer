@@ -204,8 +204,10 @@ def apply_discard_rules(item: dict, rules: dict, published_titles: list[str]) ->
 
 
 def assign_corner(item: dict, topic_type: str) -> str:
-    """Assign a corner to the topic."""
+    """Assign a corner based on topic content, not just source."""
     title = item.get('topic', '').lower()
+    desc = item.get('description', '').lower()
+    text = title + ' ' + desc
     source = item.get('source', 'rss').lower()
 
     howto_keywords = [
@@ -213,19 +215,41 @@ def assign_corner(item: dict, topic_type: str) -> str:
         'introduction', 'basics', 'setup', 'install', 'walkthrough',
         'step by step', 'step-by-step', 'beginner', 'learn', 'crash course',
         'cheat sheet', 'cheatsheet', 'quickstart', 'quick start',
-        'best practices', 'tips', 'tricks',
+        'best practices', 'tips', 'tricks', 'cookbook', 'recipe',
+    ]
+    casestudy_keywords = [
+        'case study', 'lessons learned', 'how we', 'post-mortem', 'postmortem',
+        'incident', 'migration', 'scaled', 'scaling', 'adopted', 'built',
+        'experience', 'journey', 'story', 'retrospective',
+    ]
+    quicktake_keywords = [
+        'launch', 'announce', 'release', 'update', 'breaking',
+        'acquisition', 'raises', 'funding', 'acquires', 'shuts down',
+        'deprecat', 'ban', 'sued', 'layoff', 'ipo',
+    ]
+    factcheck_keywords = [
+        'myth', 'debunk', 'actually', 'misconception', 'truth about',
+        'is it really', 'overrated', 'overhyped', 'vs', 'compared',
+        'benchmark', 'analysis', 'study shows', 'research',
     ]
 
-    if topic_type == 'evergreen':
-        if any(kw in title for kw in howto_keywords):
-            return 'HowTo'
-        return 'DeepDive'
-    elif topic_type == 'trending':
-        if source in ['github', 'product_hunt']:
-            return 'DeepDive'
+    # Content-based matching (priority order)
+    if any(kw in text for kw in howto_keywords):
         return 'HowTo'
-    else:  # personality
+    if any(kw in text for kw in casestudy_keywords):
         return 'CaseStudy'
+    if any(kw in text for kw in factcheck_keywords):
+        return 'FactCheck'
+    if any(kw in text for kw in quicktake_keywords):
+        return 'QuickTake'
+
+    # Fallback: source-based
+    if source in ['github', 'product_hunt']:
+        return 'DeepDive'
+    if source == 'hacker_news':
+        return 'QuickTake'
+
+    return 'DeepDive'
 
 
 def calculate_quality_score(item: dict, rules: dict) -> int:
@@ -258,7 +282,10 @@ def calculate_quality_score(item: dict, rules: dict) -> int:
 # --- Collection functions per source ---
 
 def collect_google_trends() -> list[dict]:
-    """Google Trends (pytrends) -- daily trending keywords."""
+    """Google Trends (pytrends) -- daily trending keywords.
+    NOTE: pytrends frequently breaks due to Google blocking. This is non-critical;
+    the bot works fine with GitHub, HN, Product Hunt, and RSS sources alone.
+    """
     items = []
     try:
         from pytrends.request import TrendReq
@@ -274,8 +301,10 @@ def collect_google_trends() -> list[dict]:
                 'search_demand_score': 15,
                 'topic_type': 'trending',
             })
+    except ImportError:
+        logger.info("pytrends not installed — skipping Google Trends (optional)")
     except Exception as e:
-        logger.warning(f"Google Trends collection failed: {e}")
+        logger.info(f"Google Trends unavailable (non-critical): {e}")
     return items
 
 
