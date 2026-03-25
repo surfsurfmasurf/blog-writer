@@ -14,6 +14,9 @@ dist/
 build/
 .eggs/
 
+# Conda
+.conda/
+
 # 런타임 데이터 (개인 글감/발행 이력)
 data/topics/*.json
 data/collected/*.json
@@ -22,6 +25,7 @@ data/pending_review/*.json
 data/published/*.json
 data/analytics/*.json
 data/drafts/*.json
+data/failed_outputs/
 data/images/
 data/images/pending_prompts.json
 

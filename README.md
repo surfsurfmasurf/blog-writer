@@ -26,10 +26,10 @@ AI 기반 한국어 블로그 자동화 시스템.
 ## 시스템 구조
 
 ```
-봇 레이어 (Python)          AI 레이어 (OpenClaw)
+봇 레이어 (Python)          AI 레이어 (Gemini API)
 ─────────────────           ────────────────────
-수집봇                       blog-writer 에이전트
-  └─ 트렌드 수집               └─ 글감 → 완성 글 작성
+수집봇                       writer_bot.py
+  └─ 트렌드 수집               └─ 글감 → Gemini → 완성 글
   └─ 품질 점수 계산
   └─ 폐기 규칙 적용
           │
@@ -41,21 +41,24 @@ AI 기반 한국어 블로그 자동화 시스템.
           │
           ▼
 분석봇 → Telegram 리포트
-스케줄러 → 모든 봇 시간 관리
+run.py → 즉시 실행 (수집→작성→발행)
+스케줄러 → 자동 시간 관리 (cron / Task Scheduler)
 ```
 
 ### 파일 구조
 
 ```
 blog-writer/
+├── run.py                  ← 즉시 실행 진입점 (수집→작성→발행)
 ├── bots/
 │   ├── collector_bot.py    ← 수집봇 (Google Trends, GitHub, HN, RSS)
+│   ├── writer_bot.py       ← 글 작성봇 (Gemini API)
 │   ├── publisher_bot.py    ← 발행봇 (Blogger API + 안전장치)
 │   ├── linker_bot.py       ← 링크봇 (쿠팡 파트너스)
 │   ├── analytics_bot.py    ← 분석봇 (5대 핵심 지표)
 │   ├── image_bot.py        ← 이미지봇 (만평 3가지 모드)
 │   ├── scheduler.py        ← 스케줄러 + Telegram 봇
-│   └── article_parser.py   ← OpenClaw 출력 파서
+│   └── article_parser.py   ← Gemini 출력 파서
 ├── config/
 │   ├── blogs.json          ← 블로그 ID 설정
 │   ├── schedule.json       ← 발행 시간표
@@ -66,9 +69,11 @@ blog-writer/
 ├── data/                   ← 런타임 데이터 (gitignore)
 ├── scripts/
 │   ├── get_token.py        ← Google OAuth 토큰 발급
+│   ├── setup.sh            ← Linux/macOS 설치 스크립트
 │   └── setup.bat           ← Windows 설치 스크립트
+├── environment.yml         ← conda 환경 설정
 ├── .env.example            ← 환경변수 템플릿
-└── requirements.txt
+└── requirements.txt        ← pip 패키지 목록
 ```
 
 ---
@@ -78,9 +83,10 @@ blog-writer/
 ### 필수
 - **Python 3.11 이상** — [python.org](https://www.python.org/downloads/)
 - **Git** — [git-scm.com](https://git-scm.com/)
+- **Conda** (권장) — [Miniconda](https://docs.conda.io/en/latest/miniconda.html) 또는 Anaconda
 - **Google 계정** — Blogger 블로그 운영용
+- **Gemini API Key** — AI 글 작성용 ([Google AI Studio](https://aistudio.google.com/))
 - **Telegram 계정** — 봇 알림 수신용
-- **OpenClaw** — AI 글 작성 에이전트 (ChatGPT Pro 구독 필요)
 
 ### 선택
 - **쿠팡 파트너스 계정** — 링크 수익화용
@@ -97,28 +103,44 @@ git clone https://github.com/sinmb79/blog-writer.git
 cd blog-writer
 ```
 
-### 2. 설치 스크립트 실행 (Windows)
+### 2. 설치 스크립트 실행
 
-탐색기에서 `scripts\setup.bat` 더블클릭 또는:
+**Linux / macOS (conda 자동 감지):**
+
+```bash
+chmod +x scripts/setup.sh
+./scripts/setup.sh
+```
+
+스크립트가 자동으로 처리하는 것:
+- conda 환경 생성 (conda 없으면 venv 폴백)
+- 패키지 설치
+- `.env` 파일 생성
+- `data/`, `logs/` 디렉토리 생성
+- cron 등록 (선택)
+
+**Windows:**
 
 ```cmd
 scripts\setup.bat
 ```
 
-스크립트가 자동으로 처리하는 것:
-- Python 가상환경(`venv`) 생성
-- 패키지 설치 (`requirements.txt`)
-- `.env` 파일 생성 (`.env.example` 복사)
-- `data/`, `logs/` 폴더 생성
-- Windows 작업 스케줄러에 자동 시작 등록
-
-### 3. 수동 설치 (선택)
+### 3. 수동 설치 (conda)
 
 ```bash
-python -m venv venv
-venv\Scripts\activate      # Windows
+conda env create -f environment.yml
+conda activate blog-writer
+cp .env.example .env
+```
+
+### 4. 수동 설치 (venv)
+
+```bash
+python3 -m venv venv
+source venv/bin/activate        # Linux / macOS
+# venv\Scripts\activate         # Windows
 pip install -r requirements.txt
-copy .env.example .env
+cp .env.example .env
 ```
 
 ---
@@ -133,6 +155,10 @@ GOOGLE_CLIENT_ID=         # Google Cloud Console에서 발급
 GOOGLE_CLIENT_SECRET=     # Google Cloud Console에서 발급
 GOOGLE_REFRESH_TOKEN=     # scripts/get_token.py 실행 후 입력
 BLOG_MAIN_ID=             # Blogger 대시보드 URL에서 확인
+
+# ─── Gemini API (필수, 글 작성용) ────────────────────
+GEMINI_API_KEY=           # Google AI Studio에서 발급
+GEMINI_MODEL=gemini-2.5-flash  # 또는 gemini-2.0-flash, gemini-2.5-pro
 
 # ─── 쿠팡 파트너스 (선택, 링크 수익화) ────────────────
 COUPANG_ACCESS_KEY=
@@ -184,8 +210,8 @@ https://www.blogger.com/blog/posts/XXXXXXXXXXXXXXXXXX
 ### 2. 토큰 발급
 
 ```bash
-venv\Scripts\activate
-python scripts\get_token.py
+conda activate blog-writer   # 또는 source venv/bin/activate
+python scripts/get_token.py
 ```
 
 브라우저가 열리면 Google 계정으로 로그인 → 권한 허용
@@ -195,32 +221,58 @@ python scripts\get_token.py
 
 ## 실행하기
 
-### 스케줄러 시작 (메인 프로세스)
+### 즉시 실행 (권장 — 실행할 때마다 글 1편 작성 + 발행)
 
 ```bash
-venv\Scripts\activate
-python bots\scheduler.py
+conda activate blog-writer
+
+# 전체 파이프라인: 수집 → 작성 → 발행
+python run.py
+
+# 발행 없이 테스트 (글 작성까지만)
+python run.py --dry-run
+
+# 수집만
+python run.py --collect
+
+# 작성만 (발행 안 함)
+python run.py --write
+```
+
+### 스케줄러 시작 (백그라운드 자동 발행)
+
+```bash
+conda activate blog-writer
+python bots/scheduler.py
 ```
 
 ### 각 봇 단독 테스트
 
 ```bash
 # 수집봇 테스트 (글감 수집)
-python bots\collector_bot.py
+python bots/collector_bot.py
 
 # 분석봇 테스트 (일일 리포트)
-python bots\analytics_bot.py
+python bots/analytics_bot.py
 
 # 분석봇 주간 리포트
-python bots\analytics_bot.py weekly
+python bots/analytics_bot.py weekly
 
 # 이미지 프롬프트 배치 전송 (request 모드)
-python bots\image_bot.py batch
+python bots/image_bot.py batch
 ```
 
-### 자동 시작 확인 (Windows)
+### 자동 시작 설정
 
-작업 스케줄러(`taskschd.msc`)에서 **BlogEngine** 작업이 등록되어 있으면 PC 시작 시 자동 실행됩니다.
+**Linux (cron):** `scripts/setup.sh` 실행 시 선택적으로 cron 등록. 수동 등록:
+
+```bash
+crontab -e
+# 매일 09:00 실행
+0 9 * * * source /path/to/conda/etc/profile.d/conda.sh && conda activate blog-writer && cd /path/to/blog-writer && python run.py >> logs/cron.log 2>&1
+```
+
+**Windows:** 작업 스케줄러(`taskschd.msc`)에서 **BlogEngine** 작업 확인.
 
 ---
 
@@ -229,7 +281,7 @@ python bots\image_bot.py batch
 | 시간 | 작업 |
 |------|------|
 | 07:00 | 수집봇 — 트렌드 수집 + 품질 점수 계산 + 폐기 필터링 |
-| 08:00 | AI 글 작성 트리거 (OpenClaw 서브에이전트) |
+| 08:00 | AI 글 작성 트리거 (Gemini API) |
 | 09:00 | 발행봇 — 첫 번째 글 발행 |
 | 12:00 | 발행봇 — 두 번째 글 발행 |
 | 15:00 | 발행봇 — 세 번째 글 (선택) |
@@ -310,23 +362,26 @@ OpenAI DALL-E 3 API를 직접 호출해 자동 생성.
 
 ---
 
-## OpenClaw 서브에이전트 설정
+## Gemini API 글 작성
 
-`~/.openclaw/` 디렉토리에 아래 파일을 배치합니다:
+글 작성은 Google Gemini API를 사용합니다. 별도의 에이전트 설정 없이 `.env`에 API 키만 설정하면 동작합니다.
+
+### 지원 모델
+
+| 모델 | 특징 | `.env` 설정값 |
+|------|------|---------------|
+| **Gemini 2.5 Flash** (기본) | 빠르고 저렴 | `gemini-2.5-flash` |
+| **Gemini 2.0 Flash** | 안정적 | `gemini-2.0-flash` |
+| **Gemini 2.5 Pro** | 최고 품질, 비용 높음 | `gemini-2.5-pro` |
+
+### 글 작성 파이프라인
 
 ```
-~/.openclaw/
-├── agents/
-│   ├── main/AGENTS.md              ← 에이전트 관리 규칙
-│   └── blog-writer/SOUL.md         ← 글쓰기 에이전트 설정
-└── workspace-blog-writer/
-    ├── personas/tech_insider.md    ← 테크인사이더 페르소나
-    ├── corners/                    ← 5개 코너 설정 파일
-    └── templates/output_format.md  ← 출력 포맷 템플릿
+수집봇 (글감) → writer_bot.py (Gemini) → article_parser.py (파싱) → publisher_bot.py (발행)
 ```
 
-이 파일들은 설치 시 `~/.openclaw/` 에 수동으로 복사해야 합니다.
-(OpenClaw 설정 완료 후 `scheduler.py`의 `_call_openclaw()` 함수를 실제 호출 코드로 교체)
+- 페르소나, 코너별 톤, 출력 형식이 `bots/writer_bot.py`에 내장되어 있음
+- 커스터마이즈: `writer_bot.py`의 `SYSTEM_PROMPT` 수정
 
 ---
 
@@ -343,14 +398,17 @@ OpenAI DALL-E 3 API를 직접 호출해 자동 생성.
 
 ## 자주 묻는 질문
 
-**Q. ChatGPT Pro 없이도 사용할 수 있나요?**
-A. 봇 레이어(수집/발행/링크/분석)는 ChatGPT 없이 동작합니다. 글 작성(AI 레이어)만 OpenClaw + ChatGPT Pro를 사용합니다. 다른 LLM으로 교체하려면 `scheduler.py`의 `_call_openclaw()` 함수를 수정하세요.
+**Q. Gemini API 키는 어디서 발급하나요?**
+A. [Google AI Studio](https://aistudio.google.com/)에서 무료로 발급받을 수 있습니다. 무료 티어로도 하루 수십 회 요청이 가능합니다.
+
+**Q. 다른 LLM으로 교체할 수 있나요?**
+A. `bots/writer_bot.py`의 `generate_article()` 함수만 수정하면 됩니다. OpenAI, Claude, 로컬 LLM 등으로 교체 가능합니다.
 
 **Q. Blogger 외 다른 플랫폼을 사용할 수 있나요?**
 A. `publisher_bot.py`의 `publish_to_blogger()` 함수를 교체하면 WordPress, 티스토리 등으로 변경 가능합니다.
 
-**Q. Windows가 아닌 환경에서 사용하려면?**
-A. `setup.bat` 대신 수동으로 venv를 생성하고 패키지를 설치하세요. `scheduler.py`는 크로스 플랫폼으로 동작합니다. Windows 작업 스케줄러 등록 부분만 Linux cron 또는 macOS launchd로 대체하세요.
+**Q. Linux에서 어떻게 설치하나요?**
+A. `./scripts/setup.sh` 실행하면 conda(또는 venv)로 환경 설정 + cron 등록까지 자동 처리됩니다.
 
 **Q. 수집봇이 아무것도 가져오지 못해요.**
 A. `config/sources.json`의 RSS URL이 유효한지 확인하세요. Google Trends는 간혹 요청 제한이 걸릴 수 있으며, 이 경우 `pytrends` 관련 로그를 확인하세요.

@@ -1,0 +1,21 @@
+name: blog-writer
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - pytrends
+      - google-api-python-client
+      - google-auth-oauthlib
+      - google-auth-httplib2
+      - google-generativeai
+      - python-dotenv
+      - apscheduler
+      - requests
+      - beautifulsoup4
+      - feedparser
+      - markdown
+      - python-telegram-bot==20.7
+      - lxml

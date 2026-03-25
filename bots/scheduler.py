@@ -91,20 +91,24 @@ def _trigger_openclaw_writer():
             continue
         topic_data = json.loads(topic_file.read_text(encoding='utf-8'))
         logger.info(f"글 작성 요청: {topic_data.get('topic', '')}")
-        _call_openclaw(topic_data, draft_check)
+        _call_gemini_writer(topic_data, draft_check)
 
 
-def _call_openclaw(topic_data: dict, output_path: Path):
-    logger.info(f"OpenClaw 호출 (플레이스홀더): {topic_data.get('topic', '')}")
-    # OpenClaw 연동 완료 후 아래 주석 해제:
-    # import subprocess
-    # result = subprocess.run(
-    #     ['openclaw', 'run', 'blog-writer', '--input', json.dumps(topic_data)],
-    #     capture_output=True, text=True
-    # )
-    # output = result.stdout
-    topic_data['_pending_openclaw'] = True
-    output_path.write_text(json.dumps(topic_data, ensure_ascii=False, indent=2), encoding='utf-8')
+def _call_gemini_writer(topic_data: dict, output_path: Path):
+    """Gemini API로 글 작성 후 드래프트 저장"""
+    logger.info(f"Gemini 글 작성 요청: {topic_data.get('topic', '')}")
+    try:
+        import writer_bot
+        article = writer_bot.write_article(topic_data)
+        if article:
+            output_path.write_text(
+                json.dumps(article, ensure_ascii=False, indent=2), encoding='utf-8'
+            )
+            logger.info(f"Gemini 글 작성 완료: {article.get('title', '')}")
+        else:
+            logger.error(f"Gemini 글 작성 실패: {topic_data.get('topic', '')}")
+    except Exception as e:
+        logger.error(f"Gemini 글 작성 오류: {e}")
 
 
 def job_publish(slot: int):
@@ -124,8 +128,6 @@ def _publish_next():
     for draft_file in sorted(drafts_dir.glob('*.json')):
         try:
             article = json.loads(draft_file.read_text(encoding='utf-8'))
-            if article.get('_pending_openclaw'):
-                continue
             sys.path.insert(0, str(BASE_DIR / 'bots'))
             import publisher_bot
             import linker_bot

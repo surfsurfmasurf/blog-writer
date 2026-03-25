@@ -25,7 +25,7 @@ def main():
     if not os.path.exists(CREDENTIALS_PATH):
         print(f"[ERROR] credentials.json 파일이 없습니다: {CREDENTIALS_PATH}")
         print("Google Cloud Console에서 OAuth 클라이언트 ID를 생성하고")
-        print("credentials.json 을 C:\\blog-engine\\ 에 저장하세요.")
+        print(f"credentials.json 을 프로젝트 루트에 저장하세요: {BASE_DIR}")
         sys.exit(1)
 
     creds = None
