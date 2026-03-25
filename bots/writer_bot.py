@@ -225,16 +225,32 @@ def generate_korean_summary(article: dict) -> str | None:
     # Truncate body to avoid token limits
     body_truncated = body[:6000] if len(body) > 6000 else body
 
-    prompt = f"""아래 영문 기술 블로그 글의 한국어 요약을 작성해주세요.
+    prompt = f"""아래 영문 기술 블로그 글을 한국어로 요약해주세요.
+
+## 출력 형식 (HTML, 정확히 이 구조를 따를 것)
+
+<b style="font-size:1.1em;">◼ TL;DR — 한국어 요약</b><br><br>
+
+<b>▸ 핵심 포인트</b><br>
+• [핵심1]<br>
+• [핵심2]<br>
+• [핵심3]<br>
+• [핵심4 — 필요시]<br>
+• [핵심5 — 필요시]<br><br>
+
+<b>▸ 한 줄 정리</b><br>
+[전체 글의 핵심을 한 문장으로]<br><br>
+
+<b>▸ 이런 분에게 추천</b><br>
+[대상 독자 1~2줄]
 
 ## 규칙
-- 한국어로 작성 (영문 기술 용어는 그대로 유지)
-- 3~5개 핵심 포인트를 불릿으로 정리
-- 마지막에 한 줄 요약 추가
-- 전체 분량: 300~500자
-- 톤: 친근하지만 전문적 (~입니다/합니다 체)
-- HTML 태그 사용 가능 (<b>, <br>, <ul>, <li>)
-- 맨 처음에 "📌 <b>한국어 요약</b><br><br>" 로 시작
+- 한국어로 작성 (영문 기술 용어는 그대로 유지: API, SDK, Docker 등)
+- 핵심 포인트 3~5개
+- 전체 분량: 400~700자
+- 톤: 시니어 개발자가 후배에게 설명하듯 (~입니다/합니다 체)
+- 위 HTML 형식을 정확히 따를 것. 마크다운 사용 금지.
+- 절대 원문을 그대로 번역하지 말고, 핵심만 추출해서 재구성
 
 ## 원문 제목
 {title}
@@ -250,7 +266,7 @@ def generate_korean_summary(article: dict) -> str | None:
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.5,
-                max_output_tokens=2048,
+                max_output_tokens=4096,
             ),
         )
         summary = response.text.strip()

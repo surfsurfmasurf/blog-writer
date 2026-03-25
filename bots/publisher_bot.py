@@ -205,10 +205,18 @@ def build_full_html(article: dict, body_html: str, toc_html: str) -> str:
     # Korean summary section
     if korean_summary:
         html_parts.append(
-            '<hr style="margin:2em 0;border:none;border-top:2px solid #e0e0e0;" />'
-            '<div class="korean-summary" style="background:#f8f9fa;border-left:4px solid #4285f4;'
-            'padding:1.2em 1.5em;margin:1.5em 0;border-radius:0 8px 8px 0;'
-            'font-family:\'Noto Sans KR\',sans-serif;line-height:1.8;">'
+            '<hr style="margin:2.5em 0 1.5em;border:none;border-top:1px solid #ddd;" />'
+            '<div class="korean-summary" style="'
+            'background:linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);'
+            'color:#e0e0e0;'
+            'padding:1.8em 2em;'
+            'margin:1.5em 0;'
+            'border-radius:12px;'
+            'font-family:\'Noto Sans KR\', -apple-system, sans-serif;'
+            'line-height:1.9;'
+            'font-size:0.95em;'
+            'box-shadow:0 4px 15px rgba(0,0,0,0.1);'
+            '">'
             f'{korean_summary}'
             '</div>'
         )

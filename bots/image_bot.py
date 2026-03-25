@@ -72,8 +72,8 @@ def send_telegram(text: str):
 
 def generate_featured_image(title: str, description: str = '', tags: list = None) -> str | None:
     """
-    Generate a featured/hero image for a blog article using Gemini's
-    native image generation (generate_content with image output).
+    Generate a featured/hero image using Gemini's image generation model.
+    Model: gemini-2.5-flash-image (supports response_modalities=['IMAGE'])
     Returns: local file path to saved image, or None on failure.
     """
     if not GEMINI_API_KEY:
@@ -86,7 +86,6 @@ def generate_featured_image(title: str, description: str = '', tags: list = None
 
         client = genai.Client(api_key=GEMINI_API_KEY)
 
-        # Build a prompt for a clean, professional tech blog featured image
         tags_str = ', '.join(tags[:3]) if tags else ''
         prompt = (
             f"Generate an image: A clean, modern, professional blog featured image "
@@ -94,33 +93,45 @@ def generate_featured_image(title: str, description: str = '', tags: list = None
             f"{f'Keywords: {tags_str}. ' if tags_str else ''}"
             f"Style: minimalist flat illustration, subtle gradients, tech-themed, "
             f"abstract geometric shapes, muted professional color palette (blues, grays, whites), "
-            f"no text, no watermarks, suitable as a blog header image. "
-            f"Wide landscape format."
+            f"no text, no watermarks, suitable as a blog header image."
         )
 
-        # Use Gemini model with native image generation
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_modalities=['IMAGE', 'TEXT'],
-            ),
-        )
+        # Try image-capable models in order of preference
+        image_models = [
+            'gemini-2.5-flash-image',
+            'gemini-2.0-flash-exp',
+        ]
 
-        # Extract image from response parts
-        if response.candidates:
-            for part in response.candidates[0].content.parts:
-                if part.inline_data and part.inline_data.mime_type.startswith('image/'):
-                    image_data = part.inline_data.data
-                    ext = 'png' if 'png' in part.inline_data.mime_type else 'jpg'
-                    safe_name = re.sub(r'[^\w\-]', '_', title)[:50]
-                    filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}.{ext}"
-                    save_path = IMAGES_DIR / filename
-                    save_path.write_bytes(image_data)
-                    logger.info(f"Featured image generated: {save_path}")
-                    return str(save_path)
+        for model_name in image_models:
+            try:
+                logger.info(f"Trying image model: {model_name}")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_modalities=['IMAGE'],
+                    ),
+                )
 
-        logger.warning("Gemini returned no image in response")
+                # Extract image from response parts
+                if response.candidates:
+                    for part in response.candidates[0].content.parts:
+                        if part.inline_data and part.inline_data.mime_type.startswith('image/'):
+                            image_data = part.inline_data.data
+                            ext = 'png' if 'png' in part.inline_data.mime_type else 'jpg'
+                            safe_name = re.sub(r'[^\w\-]', '_', title)[:50]
+                            filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}.{ext}"
+                            save_path = IMAGES_DIR / filename
+                            save_path.write_bytes(image_data)
+                            logger.info(f"Featured image generated with {model_name}: {save_path}")
+                            return str(save_path)
+
+                logger.info(f"{model_name}: no image in response, trying next model")
+            except Exception as e:
+                logger.info(f"{model_name} failed: {e}")
+                continue
+
+        logger.warning("All image models failed")
         return None
 
     except Exception as e:
