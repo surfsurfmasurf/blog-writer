@@ -151,7 +151,7 @@ def step_publish(article: dict) -> bool:
     if not article.get('_body_is_html'):
         body_html = md_lib.markdown(
             article.get('body', ''),
-            extensions=['toc', 'tables', 'fenced_code']
+            extensions=['tables', 'fenced_code']
         )
         body_html = linker_bot.process(article, body_html)
 

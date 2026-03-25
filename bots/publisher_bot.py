@@ -123,19 +123,12 @@ def check_safety(article: dict, safety_cfg: dict) -> tuple[bool, str]:
 # --- HTML Conversion -----------------------------------------------
 
 def markdown_to_html(md_text: str) -> str:
-    """Markdown to HTML conversion (with table of contents extension)"""
+    """Markdown to HTML conversion"""
     md = markdown.Markdown(
-        extensions=['toc', 'tables', 'fenced_code', 'attr_list'],
-        extension_configs={
-            'toc': {
-                'title': 'Table of Contents',
-                'toc_depth': '2-3',
-            }
-        }
+        extensions=['tables', 'fenced_code', 'attr_list']
     )
     html = md.convert(md_text)
-    toc = md.toc  # Table of contents HTML
-    return html, toc
+    return html
 
 
 def insert_adsense_placeholders(html: str) -> str:
@@ -191,15 +184,13 @@ def build_json_ld(article: dict, blog_url: str = '') -> str:
     return f'<script type="application/ld+json">\n{json.dumps(schema, ensure_ascii=False, indent=2)}\n</script>'
 
 
-def build_full_html(article: dict, body_html: str, toc_html: str) -> str:
-    """Assemble final HTML: JSON-LD + TOC + body + Korean summary + disclaimer"""
+def build_full_html(article: dict, body_html: str) -> str:
+    """Assemble final HTML: JSON-LD + body + Korean summary + disclaimer"""
     json_ld = build_json_ld(article)
     disclaimer = article.get('disclaimer', '')
     korean_summary = article.get('korean_summary', '')
 
     html_parts = [json_ld]
-    if toc_html:
-        html_parts.append(f'<div class="toc-wrapper">{toc_html}</div>')
     html_parts.append(body_html)
 
     # Korean summary section
@@ -366,13 +357,13 @@ def publish(article: dict) -> bool:
         return False
 
     # Markdown to HTML
-    body_html, toc_html = markdown_to_html(article.get('body', ''))
+    body_html = markdown_to_html(article.get('body', ''))
 
     # AdSense placeholders
     body_html = insert_adsense_placeholders(body_html)
 
     # Assemble final HTML
-    full_html = build_full_html(article, body_html, toc_html)
+    full_html = build_full_html(article, body_html)
 
     # Google authentication
     try:
@@ -418,9 +409,9 @@ def approve_pending(filepath: str) -> bool:
         article.pop('created_at', None)
 
         # Force publish bypassing safety checks
-        body_html, toc_html = markdown_to_html(article.get('body', ''))
+        body_html = markdown_to_html(article.get('body', ''))
         body_html = insert_adsense_placeholders(body_html)
-        full_html = build_full_html(article, body_html, toc_html)
+        full_html = build_full_html(article, body_html)
 
         creds = get_google_credentials()
         post_result = publish_to_blogger(article, full_html, creds)
