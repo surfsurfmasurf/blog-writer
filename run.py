@@ -54,8 +54,52 @@ def step_collect() -> list[dict]:
     return topics
 
 
+def _load_used_topics() -> set:
+    """Load all topic names that have been drafted or published — to avoid repeats."""
+    used = set()
+
+    # From drafts
+    drafts_dir = DATA_DIR / 'drafts'
+    drafts_dir.mkdir(exist_ok=True)
+    for f in drafts_dir.glob('*.json'):
+        try:
+            data = json.loads(f.read_text(encoding='utf-8'))
+            used.add(data.get('topic', ''))
+            used.add(data.get('title', ''))
+        except Exception:
+            pass
+
+    # From published
+    published_dir = DATA_DIR / 'published'
+    published_dir.mkdir(exist_ok=True)
+    for f in published_dir.glob('*.json'):
+        try:
+            data = json.loads(f.read_text(encoding='utf-8'))
+            used.add(data.get('topic', ''))
+            used.add(data.get('title', ''))
+        except Exception:
+            pass
+
+    # From failed/pending
+    for subdir in ['failed_outputs', 'pending_review']:
+        d = DATA_DIR / subdir
+        if d.exists():
+            for f in d.glob('*.json'):
+                try:
+                    data = json.loads(f.read_text(encoding='utf-8'))
+                    used.add(data.get('topic', ''))
+                    used.add(data.get('title', ''))
+                except Exception:
+                    pass
+
+    used.discard('')
+    return used
+
+
 def step_pick_best_topic(topics: list[dict] | None = None) -> dict | None:
-    """Step 2: Select best topic (by quality score)"""
+    """Step 2: Select topic — weighted random from top candidates (not always #1)"""
+    import random
+
     logger.info("=" * 50)
     logger.info("Step 2: Selecting best topic")
     logger.info("=" * 50)
@@ -68,28 +112,48 @@ def step_pick_best_topic(topics: list[dict] | None = None) -> dict | None:
         logger.warning("No topics available for selection.")
         return None
 
-    # Exclude already drafted topics
-    drafts_dir = DATA_DIR / 'drafts'
-    drafts_dir.mkdir(exist_ok=True)
-    drafted_topics = set()
-    for f in drafts_dir.glob('*.json'):
-        try:
-            data = json.loads(f.read_text(encoding='utf-8'))
-            drafted_topics.add(data.get('topic', ''))
-        except Exception:
-            pass
+    # Exclude already used topics (drafted + published)
+    used_topics = _load_used_topics()
+    available = [t for t in topics if t.get('topic', '') not in used_topics]
 
-    available = [t for t in topics if t.get('topic', '') not in drafted_topics]
     if not available:
-        logger.info("All topics already drafted. Selecting highest score from full list.")
-        available = topics
+        logger.info("All topics already used. Forcing re-collection.")
+        # Delete old topic files and re-collect
+        topics_dir = DATA_DIR / 'topics'
+        for f in topics_dir.glob('*.json'):
+            f.unlink(missing_ok=True)
+        logger.info("Cleared old topics. Re-collecting fresh topics...")
+        fresh_topics = step_collect()
+        if fresh_topics:
+            available = [t for t in fresh_topics if t.get('topic', '') not in used_topics]
+        if not available:
+            available = fresh_topics or topics  # Last resort
 
     # Sort by quality score
     available.sort(key=lambda x: x.get('quality_score', 0), reverse=True)
-    best = available[0]
+
+    # Weighted random pick from top 10 candidates (higher score = higher chance)
+    top_n = min(10, len(available))
+    candidates = available[:top_n]
+    weights = [c.get('quality_score', 1) for c in candidates]
+    best = random.choices(candidates, weights=weights, k=1)[0]
+
+    # Remove the selected topic file so it won't be picked again
+    _mark_topic_used(best)
 
     logger.info(f"Selected topic: [{best.get('quality_score', 0)} pts][{best.get('corner', '')}] {best.get('topic', '')}")
+    logger.info(f"  (picked from {len(available)} available, {len(used_topics)} already used)")
     return best
+
+
+def _mark_topic_used(topic: dict):
+    """Delete the topic file from data/topics/ so it won't be selected again."""
+    import hashlib
+    topics_dir = DATA_DIR / 'topics'
+    topic_id = hashlib.md5(topic.get('topic', '').encode()).hexdigest()[:8]
+    for f in topics_dir.glob(f'*_{topic_id}.json'):
+        f.unlink(missing_ok=True)
+        logger.debug(f"Removed used topic file: {f.name}")
 
 
 def step_write(topic_data: dict) -> dict | None:
@@ -180,27 +244,24 @@ def step_publish(article: dict) -> bool:
 
 
 def _load_today_topics() -> list[dict]:
-    """Load today's collected topics"""
+    """Load all available topics (today first, then recent)"""
     topics_dir = DATA_DIR / 'topics'
     topics_dir.mkdir(exist_ok=True)
-    today = datetime.now().strftime('%Y%m%d')
     topics = []
-    for f in sorted(topics_dir.glob(f'{today}_*.json')):
+
+    # Load all topic files, newest first
+    for f in sorted(topics_dir.glob('*.json'), reverse=True):
         try:
             topics.append(json.loads(f.read_text(encoding='utf-8')))
         except Exception:
             pass
+        if len(topics) >= 200:
+            break
 
-    # If no topics today, load recent topics
-    if not topics:
-        logger.info("No topics collected today -> searching existing topics")
-        for f in sorted(topics_dir.glob('*.json'), reverse=True):
-            try:
-                topics.append(json.loads(f.read_text(encoding='utf-8')))
-            except Exception:
-                pass
-            if len(topics) >= 50:
-                break
+    if topics:
+        logger.info(f"Loaded {len(topics)} topics from pool")
+    else:
+        logger.info("No topics in pool")
 
     return topics
 
