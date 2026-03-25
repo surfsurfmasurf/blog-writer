@@ -1,18 +1,21 @@
 {
   "crypto_keywords": [
-    "scam", "ponzi", "rug pull", "lawsuit", "crypto fraud",
-    "bitcoin", "ethereum", "cryptocurrency", "token sale", "ICO"
+    "crypto scam", "ponzi scheme", "rug pull", "crypto fraud",
+    "token sale", "ICO fraud"
   ],
   "criticism_keywords": [
-    "lawsuit", "victim", "controversy", "corruption", "whistleblower", "scandal"
+    "class action lawsuit", "data breach victim", "whistleblower complaint",
+    "corruption scandal"
   ],
   "investment_keywords": [
-    "guaranteed returns", "guaranteed profit", "sure to rise", "must invest", "financial advice"
+    "guaranteed returns", "guaranteed profit", "not financial advice",
+    "investment advice"
   ],
   "legal_keywords": [
-    "illegal", "unlawful", "penalty", "fine", "imprisonment", "prosecution"
+    "illegal activity", "criminal prosecution", "prison sentence",
+    "regulatory penalty"
   ],
   "always_manual_review": ["FactCheck"],
-  "min_sources_required": 2,
-  "min_quality_score_for_auto": 75
+  "min_sources_required": 1,
+  "min_quality_score_for_auto": 40
 }

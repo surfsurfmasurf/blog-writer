@@ -92,15 +92,19 @@ def check_safety(article: dict, safety_cfg: dict) -> tuple[bool, str]:
     if corner in manual_corners:
         return True, f'Corner "{corner}" always requires manual review'
 
-    # Risky keyword detection
+    # Risky keyword detection (case-insensitive, word-boundary match)
     all_keywords = (
         safety_cfg.get('crypto_keywords', []) +
         safety_cfg.get('criticism_keywords', []) +
         safety_cfg.get('investment_keywords', []) +
         safety_cfg.get('legal_keywords', [])
     )
+    body_lower = body.lower()
     for kw in all_keywords:
-        if kw in body:
+        # Use word boundary regex to avoid false positives
+        # e.g., "fine" should NOT match "fine-tuning" or "define"
+        pattern = r'\b' + re.escape(kw.lower()) + r'\b'
+        if re.search(pattern, body_lower):
             return True, f'Risky keyword detected: "{kw}"'
 
     # Fewer than minimum sources
