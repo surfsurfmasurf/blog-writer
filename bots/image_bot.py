@@ -72,7 +72,8 @@ def send_telegram(text: str):
 
 def generate_featured_image(title: str, description: str = '', tags: list = None) -> str | None:
     """
-    Generate a featured/hero image for a blog article using Gemini Imagen.
+    Generate a featured/hero image for a blog article using Gemini's
+    native image generation (generate_content with image output).
     Returns: local file path to saved image, or None on failure.
     """
     if not GEMINI_API_KEY:
@@ -88,36 +89,39 @@ def generate_featured_image(title: str, description: str = '', tags: list = None
         # Build a prompt for a clean, professional tech blog featured image
         tags_str = ', '.join(tags[:3]) if tags else ''
         prompt = (
-            f"A clean, modern, professional blog featured image for a tech article. "
-            f"Topic: {title}. "
+            f"Generate an image: A clean, modern, professional blog featured image "
+            f"for a tech article about: {title}. "
             f"{f'Keywords: {tags_str}. ' if tags_str else ''}"
             f"Style: minimalist flat illustration, subtle gradients, tech-themed, "
             f"abstract geometric shapes, muted professional color palette (blues, grays, whites), "
             f"no text, no watermarks, suitable as a blog header image. "
-            f"Aspect ratio 16:9, high quality."
+            f"Wide landscape format."
         )
 
-        response = client.models.generate_images(
-            model='imagen-3.0-generate-002',
-            prompt=prompt,
-            config=types.GenerateImagesConfig(
-                number_of_images=1,
-                aspect_ratio='16:9',
-                safety_filter_level='BLOCK_ONLY_HIGH',
+        # Use Gemini model with native image generation
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_modalities=['IMAGE', 'TEXT'],
             ),
         )
 
-        if response.generated_images:
-            image_data = response.generated_images[0].image.image_bytes
-            safe_name = re.sub(r'[^\w\-]', '_', title)[:50]
-            filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}.png"
-            save_path = IMAGES_DIR / filename
-            save_path.write_bytes(image_data)
-            logger.info(f"Featured image generated: {save_path}")
-            return str(save_path)
-        else:
-            logger.warning("Imagen returned no images")
-            return None
+        # Extract image from response parts
+        if response.candidates:
+            for part in response.candidates[0].content.parts:
+                if part.inline_data and part.inline_data.mime_type.startswith('image/'):
+                    image_data = part.inline_data.data
+                    ext = 'png' if 'png' in part.inline_data.mime_type else 'jpg'
+                    safe_name = re.sub(r'[^\w\-]', '_', title)[:50]
+                    filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}.{ext}"
+                    save_path = IMAGES_DIR / filename
+                    save_path.write_bytes(image_data)
+                    logger.info(f"Featured image generated: {save_path}")
+                    return str(save_path)
+
+        logger.warning("Gemini returned no image in response")
+        return None
 
     except Exception as e:
         logger.warning(f"Featured image generation failed: {e}")
