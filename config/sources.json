@@ -1,42 +1,48 @@
 {
   "rss_feeds": [
     {
-      "name": "GeekNews",
-      "url": "https://feeds.feedburner.com/geeknews-feed",
+      "name": "TechCrunch",
+      "url": "https://techcrunch.com/feed/",
       "category": "tech",
       "trust_level": "high"
     },
     {
-      "name": "ZDNet Korea",
-      "url": "https://www.zdnet.co.kr/rss/rss.php",
+      "name": "Ars Technica",
+      "url": "https://feeds.arstechnica.com/arstechnica/index",
       "category": "tech",
       "trust_level": "high"
     },
     {
-      "name": "Yonhap IT",
-      "url": "https://www.yna.co.kr/rss/it.xml",
+      "name": "The Verge",
+      "url": "https://www.theverge.com/rss/index.xml",
       "category": "tech",
       "trust_level": "high"
     },
     {
-      "name": "Bloter",
-      "url": "https://www.bloter.net/feed",
+      "name": "MIT Technology Review",
+      "url": "https://www.technologyreview.com/feed/",
       "category": "tech",
+      "trust_level": "high"
+    },
+    {
+      "name": "InfoQ",
+      "url": "https://feed.infoq.com/",
+      "category": "engineering",
       "trust_level": "high"
     }
   ],
   "x_keywords": [
-    "바이브코딩",
     "vibe coding",
-    "AI 자동화",
-    "Claude 사용",
-    "ChatGPT 활용",
-    "비개발자 앱",
-    "노코드 AI"
+    "AI automation",
+    "Claude API",
+    "ChatGPT",
+    "open source AI",
+    "developer tools",
+    "no-code AI"
   ],
   "github_trending": {
     "url": "https://github.com/trending",
-    "languages": ["", "python", "javascript"],
+    "languages": ["", "python", "javascript", "rust", "go", "typescript"],
     "since": "daily"
   },
   "hacker_news": {

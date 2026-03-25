@@ -1,12 +1,12 @@
 """
-분석봇 (analytics_bot.py)
-역할: 블로그 성과 데이터 수집 및 리포트 생성
-5대 핵심 지표:
-1. 색인률 (Search Console)
-2. 검색 CTR (Search Console)
-3. 발행 후 14일 성과
-4. 어필리에이트 클릭률 (수동 입력)
-5. 체류시간 (Blogger 통계)
+Analytics Bot (analytics_bot.py)
+Role: Blog performance data collection and report generation
+5 Key Metrics:
+1. Index Rate (Search Console)
+2. Search CTR (Search Console)
+3. 14-Day Post-Publish Performance
+4. Affiliate Click Rate (manual input)
+5. Dwell Time (Blogger statistics)
 """
 import json
 import logging
@@ -62,7 +62,7 @@ def get_google_credentials() -> Credentials:
 
 
 def load_published_records() -> list[dict]:
-    """발행 이력 전체 로드"""
+    """Load all published records"""
     records = []
     published_dir = DATA_DIR / 'published'
     for f in published_dir.glob('*.json'):
@@ -75,7 +75,7 @@ def load_published_records() -> list[dict]:
 
 def send_telegram(text: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.warning("Telegram 설정 없음")
+        logger.warning("Telegram not configured")
         print(text)
         return
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
@@ -86,14 +86,14 @@ def send_telegram(text: str):
             'parse_mode': 'HTML',
         }, timeout=10)
     except Exception as e:
-        logger.error(f"Telegram 전송 실패: {e}")
+        logger.error(f"Telegram send failed: {e}")
 
 
-# ─── Search Console 데이터 ────────────────────────────
+# --- Search Console Data -------------------------------------------
 
 def get_search_console_data(site_url: str, start_date: str, end_date: str,
                              creds: Credentials) -> dict:
-    """Search Console API로 검색 성과 조회"""
+    """Query search performance via Search Console API"""
     try:
         service = build('searchconsole', 'v1', credentials=creds)
         request_body = {
@@ -107,12 +107,12 @@ def get_search_console_data(site_url: str, start_date: str, end_date: str,
         ).execute()
         return resp
     except Exception as e:
-        logger.warning(f"Search Console API 오류: {e}")
+        logger.warning(f"Search Console API error: {e}")
         return {}
 
 
 def calc_index_rate(published_records: list[dict], sc_data: dict) -> float:
-    """색인률 계산: 발행 글 중 Search Console에 데이터가 있는 비율"""
+    """Calculate index rate: ratio of published articles with data in Search Console"""
     if not published_records:
         return 0.0
     sc_urls = set()
@@ -124,7 +124,7 @@ def calc_index_rate(published_records: list[dict], sc_data: dict) -> float:
 
 
 def calc_average_ctr(sc_data: dict) -> float:
-    """평균 CTR 계산"""
+    """Calculate average CTR"""
     rows = sc_data.get('rows', [])
     if not rows:
         return 0.0
@@ -136,7 +136,7 @@ def calc_average_ctr(sc_data: dict) -> float:
 
 
 def get_14day_performance(published_records: list[dict], sc_data: dict) -> list[dict]:
-    """발행 후 14일 경과한 글들의 성과"""
+    """Performance of articles that are 14+ days old"""
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=14)
     sc_rows_by_url = {}
@@ -154,7 +154,7 @@ def get_14day_performance(published_records: list[dict], sc_data: dict) -> list[
         except Exception:
             continue
         if pub_dt > cutoff:
-            continue  # 14일 미경과
+            continue  # Less than 14 days old
 
         url = record.get('url', '')
         sc_row = sc_rows_by_url.get(url, {})
@@ -171,7 +171,7 @@ def get_14day_performance(published_records: list[dict], sc_data: dict) -> list[
     return results
 
 
-# ─── 리포트 생성 ──────────────────────────────────────
+# --- Report Generation ----------------------------------------------
 
 def format_daily_report(
     today_published: list[dict],
@@ -182,16 +182,16 @@ def format_daily_report(
     today_str = datetime.now().strftime('%Y-%m-%d')
     today_count = len(today_published)
     today_titles = '\n'.join(
-        f"  • [{r.get('corner', '')}] {r.get('title', '')}" for r in today_published
+        f"  - [{r.get('corner', '')}] {r.get('title', '')}" for r in today_published
     )
     return (
-        f"📊 <b>일일 리포트 — {today_str}</b>\n\n"
-        f"📝 오늘 발행: {today_count}개\n"
+        f"<b>Daily Report — {today_str}</b>\n\n"
+        f"Published today: {today_count}\n"
         f"{today_titles}\n\n"
-        f"📈 누적 발행: {total_published}개\n"
-        f"🔍 색인률: {index_rate}%\n"
-        f"🖱 평균 CTR: {avg_ctr}%\n\n"
-        f"Phase 1 목표: 색인률 80%+, CTR 3%+"
+        f"Total published: {total_published}\n"
+        f"Index rate: {index_rate}%\n"
+        f"Average CTR: {avg_ctr}%\n\n"
+        f"Phase 1 target: Index rate 80%+, CTR 3%+"
     )
 
 
@@ -203,19 +203,19 @@ def format_weekly_report(
 ) -> str:
     today_str = datetime.now().strftime('%Y-%m-%d')
     corner_lines = '\n'.join(
-        f"  • {corner}: {count}개" for corner, count in by_corner.items()
+        f"  - {corner}: {count}" for corner, count in by_corner.items()
     )
     low_lines = '\n'.join(
-        f"  ⚠ {r['title']} (클릭 {r['clicks_14d']}회)" for r in low_performers[:5]
-    ) or '  없음'
+        f"  ! {r['title']} ({r['clicks_14d']} clicks)" for r in low_performers[:5]
+    ) or '  None'
 
     return (
-        f"📊 <b>주간 리포트 — {today_str}</b>\n\n"
-        f"🔍 색인률: {index_rate}%\n"
-        f"🖱 평균 CTR: {avg_ctr}%\n\n"
-        f"📁 코너별 발행 수:\n{corner_lines}\n\n"
-        f"⚠ 14일 성과 부진 글 (클릭 0):\n{low_lines}\n\n"
-        f"💡 피드백 루프 적용 완료 → 다음 주 글감 조정"
+        f"<b>Weekly Report — {today_str}</b>\n\n"
+        f"Index rate: {index_rate}%\n"
+        f"Average CTR: {avg_ctr}%\n\n"
+        f"Articles published by section:\n{corner_lines}\n\n"
+        f"Underperforming articles at 14 days (0 clicks):\n{low_lines}\n\n"
+        f"Feedback loop applied — topic adjustments for next week"
     )
 
 
@@ -228,7 +228,7 @@ def save_analytics(data: dict, filename: str):
 
 def generate_feedback_json(index_rate: float, avg_ctr: float,
                             low_performers: list[dict], by_corner: dict) -> dict:
-    """수집봇에 피드백할 데이터 생성"""
+    """Generate feedback data for the collector bot"""
     feedback = {
         'generated_at': datetime.now().isoformat(),
         'metrics': {
@@ -241,64 +241,64 @@ def generate_feedback_json(index_rate: float, avg_ctr: float,
     if index_rate < 50:
         feedback['adjustments'].append({
             'type': 'warning',
-            'message': '색인률 50% 미만 — 글 구조/Schema 점검 필요',
+            'message': 'Index rate below 50% — review article structure/Schema',
         })
     if avg_ctr < 1:
         feedback['adjustments'].append({
             'type': 'title_meta',
-            'message': 'CTR 1% 미만 — 제목/메타 설명 스타일 변경 권고',
+            'message': 'CTR below 1% — recommend changing title/meta description style',
         })
 
-    # 성과 좋은 코너 확대
+    # Expand top-performing section
     max_corner = max(by_corner, key=by_corner.get) if by_corner else None
     if max_corner:
         feedback['adjustments'].append({
             'type': 'corner_boost',
             'corner': max_corner,
-            'message': f'{max_corner} 코너 성과 우수 — 비율 확대 권고',
+            'message': f'{max_corner} section performing well — recommend increasing proportion',
         })
 
-    # 14일 성과 0인 글감 유형 축소
+    # Reduce topic types with 0 clicks at 14 days
     if low_performers:
         bad_corners = list({r['corner'] for r in low_performers if r['clicks_14d'] == 0})
         for corner in bad_corners:
             feedback['adjustments'].append({
                 'type': 'corner_reduce',
                 'corner': corner,
-                'message': f'{corner} 코너 14일 성과 부진 — 주제 유형 축소 권고',
+                'message': f'{corner} section underperforming at 14 days — recommend reducing topic types',
             })
 
     return feedback
 
 
-# ─── 메인 실행 ───────────────────────────────────────
+# --- Main Execution -------------------------------------------------
 
 def daily_report():
-    """일일 리포트 생성 및 Telegram 전송"""
-    logger.info("=== 분석봇 일일 리포트 시작 ===")
+    """Generate daily report and send via Telegram"""
+    logger.info("=== Analytics bot daily report started ===")
     published_records = load_published_records()
 
-    # 오늘 발행 글
+    # Articles published today
     today_str = datetime.now().strftime('%Y-%m-%d')
     today_published = [
         r for r in published_records
         if r.get('published_at', '').startswith(today_str)
     ]
 
-    # Search Console 데이터 (최근 7일)
+    # Search Console data (last 7 days)
     sc_data = {}
     try:
         creds = get_google_credentials()
         if creds and creds.valid:
             end_date = datetime.now().strftime('%Y-%m-%d')
             start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-            # site_url은 블로그 URL (예: https://techinsider-kr.blogspot.com/)
-            # 설정에서 읽어오거나 환경변수로 관리
+            # site_url is the blog URL (e.g., https://techinsider-kr.blogspot.com/)
+            # Read from config or manage via environment variable
             site_url = os.getenv('BLOG_SITE_URL', '')
             if site_url:
                 sc_data = get_search_console_data(site_url, start_date, end_date, creds)
     except Exception as e:
-        logger.warning(f"Search Console 조회 실패: {e}")
+        logger.warning(f"Search Console query failed: {e}")
 
     index_rate = calc_index_rate(published_records, sc_data)
     avg_ctr = calc_average_ctr(sc_data)
@@ -308,7 +308,7 @@ def daily_report():
     )
     send_telegram(report_text)
 
-    # 저장
+    # Save
     save_analytics({
         'date': today_str,
         'today_published': len(today_published),
@@ -317,15 +317,15 @@ def daily_report():
         'avg_ctr': avg_ctr,
     }, f'{today_str}_daily.json')
 
-    logger.info("=== 분석봇 일일 리포트 완료 ===")
+    logger.info("=== Analytics bot daily report complete ===")
 
 
 def weekly_report():
-    """주간 리포트 생성 및 Telegram 전송"""
-    logger.info("=== 분석봇 주간 리포트 시작 ===")
+    """Generate weekly report and send via Telegram"""
+    logger.info("=== Analytics bot weekly report started ===")
     published_records = load_published_records()
 
-    # Search Console 데이터 (최근 28일)
+    # Search Console data (last 28 days)
     sc_data = {}
     try:
         creds = get_google_credentials()
@@ -336,29 +336,29 @@ def weekly_report():
             if site_url:
                 sc_data = get_search_console_data(site_url, start_date, end_date, creds)
     except Exception as e:
-        logger.warning(f"Search Console 조회 실패: {e}")
+        logger.warning(f"Search Console query failed: {e}")
 
     index_rate = calc_index_rate(published_records, sc_data)
     avg_ctr = calc_average_ctr(sc_data)
     perf_14d = get_14day_performance(published_records, sc_data)
 
-    # 코너별 발행 수
+    # Articles published by section
     by_corner: dict[str, int] = {}
     for r in published_records:
-        corner = r.get('corner', '기타')
+        corner = r.get('corner', 'Other')
         by_corner[corner] = by_corner.get(corner, 0) + 1
 
-    # 14일 성과 부진 글
+    # Underperforming articles at 14 days
     low_performers = [r for r in perf_14d if r['clicks_14d'] == 0]
 
     report_text = format_weekly_report(index_rate, avg_ctr, by_corner, low_performers)
     send_telegram(report_text)
 
-    # 피드백 JSON 생성
+    # Generate feedback JSON
     feedback = generate_feedback_json(index_rate, avg_ctr, low_performers, by_corner)
     save_analytics(feedback, f"{datetime.now().strftime('%Y%m%d')}_feedback.json")
 
-    logger.info("=== 분석봇 주간 리포트 완료 ===")
+    logger.info("=== Analytics bot weekly report complete ===")
     return feedback
 
 

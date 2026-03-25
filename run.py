@@ -1,12 +1,12 @@
 """
-run.py — 블로그 엔진 즉시 실행
-실행할 때마다: 글감 수집 → 최적 글감 선택 → Gemini로 글 작성 → Blogger 발행
+run.py — Blog engine immediate execution
+Each run: Collect topics → Select best topic → Write article with Gemini → Publish to Blogger
 
-사용법:
-    python run.py              # 수집 → 작성 → 발행 (전체 파이프라인)
-    python run.py --collect    # 수집만
-    python run.py --write      # 수집된 글감 중 작성만 (발행 안 함)
-    python run.py --dry-run    # 발행 없이 테스트 (글 작성까지만)
+Usage:
+    python run.py              # Collect → Write → Publish (full pipeline)
+    python run.py --collect    # Collect only
+    python run.py --write      # Write from collected topics only (no publishing)
+    python run.py --dry-run    # Test without publishing (write article only)
 """
 import argparse
 import json
@@ -15,7 +15,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# 프로젝트 루트를 path에 추가
+# Add project root to path
 BASE_DIR = Path(__file__).parent
 sys.path.insert(0, str(BASE_DIR / 'bots'))
 
@@ -38,37 +38,37 @@ logger = logging.getLogger(__name__)
 
 
 def step_collect() -> list[dict]:
-    """1단계: 글감 수집"""
+    """Step 1: Collect topics"""
     logger.info("=" * 50)
-    logger.info("1단계: 글감 수집 시작")
+    logger.info("Step 1: Collecting topics")
     logger.info("=" * 50)
 
     import collector_bot
     topics = collector_bot.run()
 
     if not topics:
-        logger.warning("수집된 글감이 없습니다.")
+        logger.warning("No topics collected.")
         return []
 
-    logger.info(f"수집 완료: {len(topics)}개 글감")
+    logger.info(f"Collection complete: {len(topics)} topics")
     return topics
 
 
 def step_pick_best_topic(topics: list[dict] | None = None) -> dict | None:
-    """2단계: 최적 글감 선택 (품질 점수 기준)"""
+    """Step 2: Select best topic (by quality score)"""
     logger.info("=" * 50)
-    logger.info("2단계: 최적 글감 선택")
+    logger.info("Step 2: Selecting best topic")
     logger.info("=" * 50)
 
-    # 인자로 전달된 글감 또는 저장된 글감에서 선택
+    # Use provided topics or load saved topics
     if not topics:
         topics = _load_today_topics()
 
     if not topics:
-        logger.warning("선택할 글감이 없습니다.")
+        logger.warning("No topics available for selection.")
         return None
 
-    # 이미 작성된 글감 제외
+    # Exclude already drafted topics
     drafts_dir = DATA_DIR / 'drafts'
     drafts_dir.mkdir(exist_ok=True)
     drafted_topics = set()
@@ -81,31 +81,31 @@ def step_pick_best_topic(topics: list[dict] | None = None) -> dict | None:
 
     available = [t for t in topics if t.get('topic', '') not in drafted_topics]
     if not available:
-        logger.info("모든 글감이 이미 작성되었습니다. 전체 목록에서 최고 점수 선택.")
+        logger.info("All topics already drafted. Selecting highest score from full list.")
         available = topics
 
-    # 품질 점수 기준 정렬
+    # Sort by quality score
     available.sort(key=lambda x: x.get('quality_score', 0), reverse=True)
     best = available[0]
 
-    logger.info(f"선택된 글감: [{best.get('quality_score', 0)}점][{best.get('corner', '')}] {best.get('topic', '')}")
+    logger.info(f"Selected topic: [{best.get('quality_score', 0)} pts][{best.get('corner', '')}] {best.get('topic', '')}")
     return best
 
 
 def step_write(topic_data: dict) -> dict | None:
-    """3단계: Gemini로 글 작성"""
+    """Step 3: Write article with Gemini"""
     logger.info("=" * 50)
-    logger.info("3단계: Gemini 글 작성")
+    logger.info("Step 3: Writing article with Gemini")
     logger.info("=" * 50)
 
     import writer_bot
     article = writer_bot.write_article(topic_data)
 
     if not article:
-        logger.error("글 작성 실패")
+        logger.error("Article writing failed")
         return None
 
-    # 드래프트 저장
+    # Save draft
     drafts_dir = DATA_DIR / 'drafts'
     drafts_dir.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -113,23 +113,23 @@ def step_write(topic_data: dict) -> dict | None:
     draft_path.write_text(
         json.dumps(article, ensure_ascii=False, indent=2), encoding='utf-8'
     )
-    logger.info(f"드래프트 저장: {draft_path.name}")
+    logger.info(f"Draft saved: {draft_path.name}")
 
     _print_article_preview(article)
     return article
 
 
 def step_publish(article: dict) -> bool:
-    """4단계: Blogger 발행"""
+    """Step 4: Publish to Blogger"""
     logger.info("=" * 50)
-    logger.info("4단계: Blogger 발행")
+    logger.info("Step 4: Publishing to Blogger")
     logger.info("=" * 50)
 
     import publisher_bot
     import linker_bot
     import markdown as md_lib
 
-    # body가 이미 HTML이 아니면 변환
+    # Convert body to HTML if not already
     if not article.get('_body_is_html'):
         body_html = md_lib.markdown(
             article.get('body', ''),
@@ -142,15 +142,15 @@ def step_publish(article: dict) -> bool:
     success = publisher_bot.publish(article)
 
     if success:
-        logger.info("발행 성공!")
+        logger.info("Publishing succeeded!")
     else:
-        logger.warning("자동 발행 실패 또는 수동 검토 대기. 로그를 확인하세요.")
+        logger.warning("Auto-publishing failed or pending manual review. Check the logs.")
 
     return success
 
 
 def _load_today_topics() -> list[dict]:
-    """오늘 수집된 글감 로드"""
+    """Load today's collected topics"""
     topics_dir = DATA_DIR / 'topics'
     topics_dir.mkdir(exist_ok=True)
     today = datetime.now().strftime('%Y%m%d')
@@ -161,9 +161,9 @@ def _load_today_topics() -> list[dict]:
         except Exception:
             pass
 
-    # 오늘 글감 없으면 최근 글감 전체 로드
+    # If no topics today, load recent topics
     if not topics:
-        logger.info("오늘 수집된 글감 없음 → 기존 글감에서 검색")
+        logger.info("No topics collected today -> searching existing topics")
         for f in sorted(topics_dir.glob('*.json'), reverse=True):
             try:
                 topics.append(json.loads(f.read_text(encoding='utf-8')))
@@ -176,62 +176,62 @@ def _load_today_topics() -> list[dict]:
 
 
 def _print_article_preview(article: dict):
-    """작성된 글 미리보기 출력"""
+    """Print article preview"""
     print("\n" + "=" * 60)
-    print(f"  제목: {article.get('title', '')}")
-    print(f"  코너: {article.get('corner', '')}")
-    print(f"  태그: {', '.join(article.get('tags', []))}")
-    print(f"  메타: {article.get('meta', '')[:80]}...")
+    print(f"  Title: {article.get('title', '')}")
+    print(f"  Corner: {article.get('corner', '')}")
+    print(f"  Tags: {', '.join(article.get('tags', []))}")
+    print(f"  Meta: {article.get('meta', '')[:80]}...")
     body = article.get('body', '')
-    print(f"  본문: {len(body)}자")
-    print(f"  출처: {len(article.get('sources', []))}개")
+    print(f"  Body: {len(body)} chars")
+    print(f"  Sources: {len(article.get('sources', []))}")
     print("=" * 60 + "\n")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='블로그 엔진 즉시 실행')
-    parser.add_argument('--collect', action='store_true', help='수집만 실행')
-    parser.add_argument('--write', action='store_true', help='수집된 글감으로 글 작성만 (발행 안 함)')
-    parser.add_argument('--dry-run', action='store_true', help='발행 없이 테스트')
+    parser = argparse.ArgumentParser(description='Blog engine immediate execution')
+    parser.add_argument('--collect', action='store_true', help='Run collection only')
+    parser.add_argument('--write', action='store_true', help='Write article from collected topics only (no publishing)')
+    parser.add_argument('--dry-run', action='store_true', help='Test without publishing')
     args = parser.parse_args()
 
-    logger.info("=== 블로그 엔진 실행 ===")
+    logger.info("=== Blog Engine Started ===")
     start_time = datetime.now()
 
-    # 수집만
+    # Collect only
     if args.collect:
         step_collect()
-        logger.info("=== 수집 완료 ===")
+        logger.info("=== Collection complete ===")
         return
 
-    # 글 작성만 (발행 안 함)
+    # Write only (no publishing)
     if args.write:
         topic = step_pick_best_topic()
         if topic:
             step_write(topic)
-        logger.info("=== 작성 완료 (발행 안 함) ===")
+        logger.info("=== Writing complete (no publishing) ===")
         return
 
-    # 전체 파이프라인: 수집 → 선택 → 작성 → 발행
+    # Full pipeline: Collect → Select → Write → Publish
     topics = step_collect()
     topic = step_pick_best_topic(topics)
     if not topic:
-        logger.error("글감을 찾을 수 없습니다. 종료합니다.")
+        logger.error("No topics found. Exiting.")
         return
 
     article = step_write(topic)
     if not article:
-        logger.error("글 작성 실패. 종료합니다.")
+        logger.error("Article writing failed. Exiting.")
         return
 
     if args.dry_run:
-        logger.info("=== dry-run 모드: 발행 건너뜀 ===")
+        logger.info("=== Dry-run mode: skipping publishing ===")
         return
 
     step_publish(article)
 
     elapsed = (datetime.now() - start_time).total_seconds()
-    logger.info(f"=== 블로그 엔진 완료 (소요 시간: {elapsed:.1f}초) ===")
+    logger.info(f"=== Blog Engine complete (elapsed: {elapsed:.1f}s) ===")
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 """
-링크봇 (linker_bot.py)
-역할: 글 본문에 쿠팡 파트너스 링크와 어필리에이트 링크 자동 삽입
+Linker Bot (linker_bot.py)
+Role: Automatically insert Coupang Partners and affiliate links into article body
 """
 import hashlib
 import hmac
@@ -43,10 +43,10 @@ def load_config(filename: str) -> dict:
         return json.load(f)
 
 
-# ─── 쿠팡 파트너스 API ────────────────────────────────
+# --- Coupang Partners API ------------------------------------------
 
 def _generate_coupang_hmac(method: str, url: str, query: str) -> dict:
-    """쿠팡 HMAC 서명 생성"""
+    """Generate Coupang HMAC signature"""
     datetime_str = datetime.now(timezone.utc).strftime('%y%m%dT%H%M%SZ')
     path = url.split(COUPANG_API_BASE)[-1].split('?')[0]
     message = datetime_str + method + path + query
@@ -63,9 +63,9 @@ def _generate_coupang_hmac(method: str, url: str, query: str) -> dict:
 
 
 def search_coupang_products(keyword: str, limit: int = 3) -> list[dict]:
-    """쿠팡 파트너스 API로 상품 검색"""
+    """Search products via Coupang Partners API"""
     if not COUPANG_ACCESS_KEY or not COUPANG_SECRET_KEY:
-        logger.warning("쿠팡 API 키 없음 — 링크 삽입 건너뜀")
+        logger.warning("Coupang API keys not set — skipping link insertion")
         return []
 
     path = '/v2/providers/affiliate_api/apis/openapi/products/search'
@@ -93,12 +93,12 @@ def search_coupang_products(keyword: str, limit: int = 3) -> list[dict]:
             for p in products[:limit]
         ]
     except Exception as e:
-        logger.warning(f"쿠팡 API 오류 ({keyword}): {e}")
+        logger.warning(f"Coupang API error ({keyword}): {e}")
         return []
 
 
 def build_coupang_link_html(product: dict) -> str:
-    """쿠팡 상품 링크 HTML 생성"""
+    """Generate Coupang product link HTML"""
     name = product.get('name', '')
     url = product.get('url', '')
     price = product.get('price', 0)
@@ -111,14 +111,14 @@ def build_coupang_link_html(product: dict) -> str:
     )
 
 
-# ─── 본문 링크 삽입 ──────────────────────────────────
+# --- Body Link Insertion -------------------------------------------
 
 def insert_links_into_html(html_content: str, coupang_keywords: list[str],
                             fixed_links: list[dict]) -> str:
-    """HTML 본문에 쿠팡 링크와 고정 링크 삽입"""
+    """Insert Coupang links and fixed links into HTML body"""
     soup = BeautifulSoup(html_content, 'lxml')
 
-    # 고정 링크 (키워드 텍스트가 본문에 있으면 첫 번째 등장 위치에 링크)
+    # Fixed links (if keyword text exists in body, link at first occurrence)
     for fixed in fixed_links:
         kw = fixed.get('keyword', '')
         link_url = fixed.get('url', '')
@@ -128,7 +128,7 @@ def insert_links_into_html(html_content: str, coupang_keywords: list[str],
         for p in soup.find_all(['p', 'li']):
             text = p.get_text()
             if kw in text:
-                # 이미 링크가 있으면 건너뜀
+                # Skip if link already exists
                 if p.find('a', string=re.compile(re.escape(kw))):
                     break
                 new_html = p.decode_contents().replace(
@@ -140,10 +140,10 @@ def insert_links_into_html(html_content: str, coupang_keywords: list[str],
                 p.append(BeautifulSoup(new_html, 'lxml'))
                 break
 
-    # 쿠팡 링크: 결론/추천 섹션 앞에 상품 박스 삽입
+    # Coupang links: insert product box before conclusion/recommendation section
     if coupang_keywords and (COUPANG_ACCESS_KEY and COUPANG_SECRET_KEY):
         coupang_block_parts = []
-        for kw in coupang_keywords[:3]:  # 최대 3개 키워드
+        for kw in coupang_keywords[:3]:  # max 3 keywords
             products = search_coupang_products(kw, limit=2)
             for product in products:
                 coupang_block_parts.append(build_coupang_link_html(product))
@@ -151,18 +151,18 @@ def insert_links_into_html(html_content: str, coupang_keywords: list[str],
         if coupang_block_parts:
             coupang_block_html = (
                 '<div class="coupang-products">\n'
-                '<p><strong>관련 상품 추천</strong></p>\n'
+                '<p><strong>Related Products</strong></p>\n'
                 + ''.join(coupang_block_parts) +
                 '</div>\n'
             )
-            # 결론 H2 앞에 삽입
+            # Insert before conclusion H2
             for h2 in soup.find_all('h2'):
-                if any(kw in h2.get_text() for kw in ['결론', '마무리', '정리', '요약']):
+                if any(kw in h2.get_text() for kw in ['conclusion', 'summary', 'wrap-up', 'final thoughts', 'key takeaways']):
                     block = BeautifulSoup(coupang_block_html, 'lxml')
                     h2.insert_before(block)
                     break
             else:
-                # 결론 섹션 없으면 본문 끝에 추가
+                # If no conclusion section, append to end of body
                 body_tag = soup.find('body') or soup
                 block = BeautifulSoup(coupang_block_html, 'lxml')
                 body_tag.append(block)
@@ -171,7 +171,7 @@ def insert_links_into_html(html_content: str, coupang_keywords: list[str],
 
 
 def add_disclaimer(html_content: str, disclaimer_text: str) -> str:
-    """쿠팡 필수 면책 문구 추가 (이미 있으면 건너뜀)"""
+    """Add Coupang required disclaimer (skip if already present)"""
     if disclaimer_text in html_content:
         return html_content
     disclaimer_html = (
@@ -181,42 +181,42 @@ def add_disclaimer(html_content: str, disclaimer_text: str) -> str:
     return html_content + disclaimer_html
 
 
-# ─── 메인 함수 ───────────────────────────────────────
+# --- Main Function --------------------------------------------------
 
 def process(article: dict, html_content: str) -> str:
     """
-    링크봇 메인: HTML 본문에 쿠팡/어필리에이트 링크 삽입 후 반환
+    Linker bot main: insert Coupang/affiliate links into HTML body and return
     """
-    logger.info(f"링크 삽입 시작: {article.get('title', '')}")
+    logger.info(f"Link insertion started: {article.get('title', '')}")
     affiliate_cfg = load_config('affiliate_links.json')
 
     coupang_keywords = article.get('coupang_keywords', [])
     fixed_links = affiliate_cfg.get('fixed_links', [])
     disclaimer_text = affiliate_cfg.get('disclaimer_text', '')
 
-    # 링크 삽입
+    # Insert links
     html_content = insert_links_into_html(html_content, coupang_keywords, fixed_links)
 
-    # 쿠팡 키워드가 있으면 면책 문구 추가
+    # Add disclaimer if Coupang keywords are present
     if coupang_keywords and disclaimer_text:
         html_content = add_disclaimer(html_content, disclaimer_text)
 
-    logger.info("링크 삽입 완료")
+    logger.info("Link insertion complete")
     return html_content
 
 
 if __name__ == '__main__':
     sample_html = '''
-    <h2>ChatGPT 소개</h2>
-    <p>ChatGPT Plus를 사용하면 더 빠른 응답을 받을 수 있습니다.</p>
-    <h2>키보드 추천</h2>
-    <p>좋은 키보드는 생산성을 높입니다.</p>
-    <h2>결론</h2>
-    <p>AI 도구를 잘 활용하세요.</p>
+    <h2>ChatGPT Introduction</h2>
+    <p>Using ChatGPT Plus gives you faster responses.</p>
+    <h2>Keyboard Recommendations</h2>
+    <p>A good keyboard improves productivity.</p>
+    <h2>Conclusion</h2>
+    <p>Make good use of AI tools.</p>
     '''
     sample_article = {
-        'title': '테스트 글',
-        'coupang_keywords': ['키보드', '마우스'],
+        'title': 'Test Article',
+        'coupang_keywords': ['keyboard', 'mouse'],
     }
     result = process(sample_article, sample_html)
     print(result[:500])

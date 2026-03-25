@@ -1,7 +1,7 @@
 """
-수집봇 (collector_bot.py)
-역할: 트렌드/도구/사례 수집 + 품질 점수 계산 + 폐기 규칙 적용
-실행: 매일 07:00 (스케줄러 호출)
+Collector Bot (collector_bot.py)
+Role: Collect trends/tools/case studies + calculate quality scores + apply discard rules
+Execution: Daily at 07:00 (called by scheduler)
 """
 import json
 import logging
@@ -35,17 +35,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 코너별 타입
+# Corner types
 CORNER_TYPES = {
-    'easy_guide': '쉬운세상',
-    'hidden_gems': '숨은보물',
-    'vibe_report': '바이브리포트',
-    'fact_check': '팩트체크',
-    'one_cut': '한컷',
+    'easy_guide': 'HowTo',
+    'hidden_gems': 'DeepDive',
+    'vibe_report': 'CaseStudy',
+    'fact_check': 'FactCheck',
+    'one_cut': 'QuickTake',
 }
 
-# 글감 타입 비율: 에버그린 50%, 트렌드 30%, 개성 20%
+# Topic type ratio: evergreen 50%, trending 30%, personality 20%
 TOPIC_RATIO = {'evergreen': 0.5, 'trending': 0.3, 'personality': 0.2}
+
+# Tech/engineering relevance keywords
+TECH_RELEVANCE_KEYWORDS = [
+    'ai', 'artificial intelligence', 'machine learning', 'deep learning',
+    'cloud', 'devops', 'programming', 'api', 'database', 'security',
+    'web', 'mobile', 'frontend', 'backend', 'fullstack', 'microservices',
+    'kubernetes', 'docker', 'terraform', 'ci/cd', 'python', 'javascript',
+    'typescript', 'rust', 'go', 'java', 'react', 'node', 'linux',
+    'open source', 'data engineering', 'data science', 'llm', 'gpt',
+    'neural network', 'nlp', 'computer vision', 'blockchain', 'crypto',
+    'serverless', 'infrastructure', 'monitoring', 'observability',
+    'software', 'developer', 'engineering', 'algorithm', 'framework',
+    'library', 'sdk', 'cli', 'automation', 'testing', 'deployment',
+    'agile', 'scrum', 'saas', 'paas', 'iaas', 'networking', 'cybersecurity',
+    'encryption', 'authentication', 'oauth', 'graphql', 'rest',
+    'sql', 'nosql', 'redis', 'postgresql', 'mongodb', 'elasticsearch',
+    'aws', 'azure', 'gcp', 'github', 'gitlab', 'vscode',
+]
 
 
 def load_config(filename: str) -> dict:
@@ -54,7 +72,7 @@ def load_config(filename: str) -> dict:
 
 
 def load_published_titles() -> list[str]:
-    """발행 이력에서 제목 목록을 불러옴 (유사도 비교용)"""
+    """Load title list from publication history (for similarity comparison)."""
     titles = []
     published_dir = DATA_DIR / 'published'
     for f in published_dir.glob('*.json'):
@@ -79,7 +97,7 @@ def is_duplicate(title: str, published_titles: list[str], threshold: float = 0.8
 
 
 def calc_freshness_score(published_at: datetime | None, max_score: int = 20) -> int:
-    """발행 시간 기준 신선도 점수 (24h 이내 만점, 7일 초과 0점)"""
+    """Freshness score based on publication time (full marks within 24h, 0 after 7 days)."""
     if published_at is None:
         return max_score // 2
     now = datetime.now(timezone.utc)
@@ -95,16 +113,17 @@ def calc_freshness_score(published_at: datetime | None, max_score: int = 20) -> 
         return int(max_score * ratio)
 
 
-def calc_korean_relevance(text: str, rules: dict) -> int:
-    """한국 독자 관련성 점수"""
-    keywords = rules['scoring']['korean_relevance']['keywords']
-    matched = sum(1 for kw in keywords if kw in text)
-    score = min(matched * 6, rules['scoring']['korean_relevance']['max'])
+def calc_topic_relevance(text: str, rules: dict) -> int:
+    """Tech/engineering topic relevance score."""
+    max_score = rules.get('scoring', {}).get('topic_relevance', {}).get('max', 30)
+    text_lower = text.lower()
+    matched = sum(1 for kw in TECH_RELEVANCE_KEYWORDS if kw in text_lower)
+    score = min(matched * 6, max_score)
     return score
 
 
 def calc_source_trust(source_url: str, rules: dict) -> tuple[int, str]:
-    """출처 신뢰도 점수 + 레벨"""
+    """Source trust score + level."""
     trust_cfg = rules['scoring']['source_trust']
     high_src = trust_cfg.get('high_sources', [])
     low_src = trust_cfg.get('low_sources', [])
@@ -119,7 +138,7 @@ def calc_source_trust(source_url: str, rules: dict) -> tuple[int, str]:
 
 
 def calc_monetization(text: str, rules: dict) -> int:
-    """수익 연결 가능성 점수"""
+    """Monetization potential score."""
     keywords = rules['scoring']['monetization']['keywords']
     matched = sum(1 for kw in keywords if kw in text)
     return min(matched * 5, rules['scoring']['monetization']['max'])
@@ -132,7 +151,7 @@ def is_evergreen(title: str, rules: dict) -> bool:
 
 def apply_discard_rules(item: dict, rules: dict, published_titles: list[str]) -> str | None:
     """
-    폐기 규칙 적용. 폐기 사유 반환(None이면 통과).
+    Apply discard rules. Returns discard reason (None if passed).
     """
     title = item.get('topic', '')
     text = title + ' ' + item.get('description', '')
@@ -141,18 +160,18 @@ def apply_discard_rules(item: dict, rules: dict, published_titles: list[str]) ->
     for rule in discard_rules:
         rule_id = rule['id']
 
-        if rule_id == 'no_korean_relevance':
-            if item.get('korean_relevance_score', 0) == 0:
-                return '한국 독자 관련성 없음'
+        if rule_id == 'no_topic_relevance':
+            if item.get('topic_relevance_score', 0) == 0:
+                return 'No tech/engineering relevance'
 
         elif rule_id == 'unverified_source':
             if item.get('source_trust_level') == 'unknown':
-                return '출처 불명'
+                return 'Unknown source'
 
         elif rule_id == 'duplicate_topic':
             threshold = rule.get('similarity_threshold', 0.8)
             if is_duplicate(title, published_titles, threshold):
-                return f'기발행 주제와 유사도 {threshold*100:.0f}% 이상'
+                return f'Similar to previously published topic (>={threshold*100:.0f}%)'
 
         elif rule_id == 'stale_trend':
             if not item.get('is_evergreen', False):
@@ -169,40 +188,48 @@ def apply_discard_rules(item: dict, rules: dict, published_titles: list[str]) ->
                             pub_at = pub_at.replace(tzinfo=timezone.utc)
                         age_days = (datetime.now(timezone.utc) - pub_at).days
                         if age_days > max_days:
-                            return f'{age_days}일 지난 트렌드'
+                            return f'Stale trend ({age_days} days old)'
 
         elif rule_id == 'promotional':
             kws = rule.get('keywords', [])
             if any(kw in text for kw in kws):
-                return '광고성/홍보성 콘텐츠'
+                return 'Promotional/advertising content'
 
         elif rule_id == 'clickbait':
             patterns = rule.get('patterns', [])
             if any(p in text for p in patterns):
-                return '클릭베이트성 주제'
+                return 'Clickbait topic'
 
     return None
 
 
 def assign_corner(item: dict, topic_type: str) -> str:
-    """글감에 코너 배정"""
+    """Assign a corner to the topic."""
     title = item.get('topic', '').lower()
     source = item.get('source', 'rss').lower()
 
+    howto_keywords = [
+        'guide', 'tutorial', 'how to', 'how-to', 'getting started',
+        'introduction', 'basics', 'setup', 'install', 'walkthrough',
+        'step by step', 'step-by-step', 'beginner', 'learn', 'crash course',
+        'cheat sheet', 'cheatsheet', 'quickstart', 'quick start',
+        'best practices', 'tips', 'tricks',
+    ]
+
     if topic_type == 'evergreen':
-        if any(kw in title for kw in ['가이드', '방법', '사용법', '입문', '튜토리얼', '기초']):
-            return '쉬운세상'
-        return '숨은보물'
+        if any(kw in title for kw in howto_keywords):
+            return 'HowTo'
+        return 'DeepDive'
     elif topic_type == 'trending':
         if source in ['github', 'product_hunt']:
-            return '숨은보물'
-        return '쉬운세상'
+            return 'DeepDive'
+        return 'HowTo'
     else:  # personality
-        return '바이브리포트'
+        return 'CaseStudy'
 
 
 def calculate_quality_score(item: dict, rules: dict) -> int:
-    """0-100점 품질 점수 계산"""
+    """Calculate quality score (0-100)."""
     text = item.get('topic', '') + ' ' + item.get('description', '')
     source_url = item.get('source_url', '')
     pub_at_str = item.get('published_at')
@@ -213,47 +240,47 @@ def calculate_quality_score(item: dict, rules: dict) -> int:
         except Exception:
             pass
 
-    kr_score = calc_korean_relevance(text, rules)
+    relevance_score = calc_topic_relevance(text, rules)
     fresh_score = calc_freshness_score(pub_at)
-    # search_demand: pytrends 연동 후 실제값 사용 (현재 기본값 10)
+    # search_demand: use real value after pytrends integration (default 10 for now)
     search_score = item.get('search_demand_score', 10)
     trust_score, trust_level = calc_source_trust(source_url, rules)
     mono_score = calc_monetization(text, rules)
 
-    item['korean_relevance_score'] = kr_score
+    item['topic_relevance_score'] = relevance_score
     item['source_trust_level'] = trust_level
     item['is_evergreen'] = is_evergreen(item.get('topic', ''), rules)
 
-    total = kr_score + fresh_score + search_score + trust_score + mono_score
+    total = relevance_score + fresh_score + search_score + trust_score + mono_score
     return min(total, 100)
 
 
-# ─── 수집 소스별 함수 ─────────────────────────────────
+# --- Collection functions per source ---
 
 def collect_google_trends() -> list[dict]:
-    """Google Trends (pytrends) — 한국 일간 트렌딩"""
+    """Google Trends (pytrends) -- daily trending keywords."""
     items = []
     try:
         from pytrends.request import TrendReq
-        pytrends = TrendReq(hl='ko', tz=540, timeout=(10, 30))
-        trending_df = pytrends.trending_searches(pn='south_korea')
+        pytrends = TrendReq(hl='en-US', tz=0, timeout=(10, 30))
+        trending_df = pytrends.trending_searches(pn='united_states')
         for keyword in trending_df[0].tolist()[:20]:
             items.append({
                 'topic': keyword,
-                'description': f'Google Trends 한국 트렌딩 키워드: {keyword}',
+                'description': f'Google Trends trending keyword: {keyword}',
                 'source': 'google_trends',
-                'source_url': f'https://trends.google.co.kr/trends/explore?q={keyword}&geo=KR',
+                'source_url': f'https://trends.google.com/trends/explore?q={keyword}&geo=US',
                 'published_at': datetime.now(timezone.utc).isoformat(),
                 'search_demand_score': 15,
                 'topic_type': 'trending',
             })
     except Exception as e:
-        logger.warning(f"Google Trends 수집 실패: {e}")
+        logger.warning(f"Google Trends collection failed: {e}")
     return items
 
 
 def collect_github_trending(sources_cfg: dict) -> list[dict]:
-    """GitHub Trending 크롤링"""
+    """GitHub Trending scraping."""
     items = []
     cfg = sources_cfg.get('github_trending', {})
     languages = cfg.get('languages', [''])
@@ -286,12 +313,12 @@ def collect_github_trending(sources_cfg: dict) -> list[dict]:
                     'extra': {'stars': stars},
                 })
         except Exception as e:
-            logger.warning(f"GitHub Trending 수집 실패 ({lang}): {e}")
+            logger.warning(f"GitHub Trending collection failed ({lang}): {e}")
     return items
 
 
 def collect_hacker_news(sources_cfg: dict) -> list[dict]:
-    """Hacker News API 상위 스토리"""
+    """Hacker News API top stories."""
     items = []
     cfg = sources_cfg.get('hacker_news', {})
     api_url = cfg.get('url', 'https://hacker-news.firebaseio.com/v0/topstories.json')
@@ -318,12 +345,12 @@ def collect_hacker_news(sources_cfg: dict) -> list[dict]:
                 'topic_type': 'trending',
             })
     except Exception as e:
-        logger.warning(f"Hacker News 수집 실패: {e}")
+        logger.warning(f"Hacker News collection failed: {e}")
     return items
 
 
 def collect_product_hunt(sources_cfg: dict) -> list[dict]:
-    """Product Hunt RSS"""
+    """Product Hunt RSS."""
     items = []
     cfg = sources_cfg.get('product_hunt', {})
     rss_url = cfg.get('rss_url', 'https://www.producthunt.com/feed')
@@ -343,12 +370,12 @@ def collect_product_hunt(sources_cfg: dict) -> list[dict]:
                 'topic_type': 'trending',
             })
     except Exception as e:
-        logger.warning(f"Product Hunt 수집 실패: {e}")
+        logger.warning(f"Product Hunt collection failed: {e}")
     return items
 
 
 def collect_rss_feeds(sources_cfg: dict) -> list[dict]:
-    """설정된 RSS 피드 수집"""
+    """Collect configured RSS feeds."""
     items = []
     feeds = sources_cfg.get('rss_feeds', [])
     for feed_cfg in feeds:
@@ -372,27 +399,28 @@ def collect_rss_feeds(sources_cfg: dict) -> list[dict]:
                     '_trust_override': trust,
                 })
         except Exception as e:
-            logger.warning(f"RSS 수집 실패 ({url}): {e}")
+            logger.warning(f"RSS collection failed ({url}): {e}")
     return items
 
 
-def extract_coupang_keywords(topic: str, description: str) -> list[str]:
-    """글감에서 쿠팡 검색 키워드 추출"""
+def extract_affiliate_keywords(topic: str, description: str) -> list[str]:
+    """Extract affiliate search keywords from topic content."""
     product_keywords = [
-        '마이크', '웹캠', '키보드', '마우스', '모니터', '노트북', '이어폰',
-        '헤드셋', '외장하드', 'USB허브', '책상', '의자', '서적', '책', '스피커',
+        'microphone', 'webcam', 'keyboard', 'mouse', 'monitor', 'laptop',
+        'earbuds', 'headset', 'external drive', 'usb hub', 'desk', 'chair',
+        'book', 'speaker', 'tablet', 'charger', 'cable', 'adapter',
     ]
-    text = topic + ' ' + description
+    text = (topic + ' ' + description).lower()
     found = [kw for kw in product_keywords if kw in text]
     if not found:
-        # IT 기기 류 글이면 기본 키워드
-        if any(kw in text for kw in ['도구', '앱', '툴', '소프트웨어', '서비스']):
-            found = ['키보드', '마우스']
+        # If it's a tools/software article, use default keywords
+        if any(kw in text for kw in ['tool', 'app', 'software', 'service', 'platform']):
+            found = ['keyboard', 'mouse']
     return found
 
 
 def save_discarded(item: dict, reason: str):
-    """폐기된 글감 로그 저장"""
+    """Save discarded topic to log."""
     discard_dir = DATA_DIR / 'discarded'
     discard_dir.mkdir(exist_ok=True)
     today = datetime.now().strftime('%Y%m%d')
@@ -403,7 +431,7 @@ def save_discarded(item: dict, reason: str):
 
 
 def save_topic(item: dict):
-    """합격한 글감을 data/topics/에 저장"""
+    """Save a passing topic to data/topics/."""
     topics_dir = DATA_DIR / 'topics'
     topics_dir.mkdir(exist_ok=True)
     topic_id = hashlib.md5(item['topic'].encode()).hexdigest()[:8]
@@ -413,13 +441,13 @@ def save_topic(item: dict):
 
 
 def run():
-    logger.info("=== 수집봇 시작 ===")
+    logger.info("=== Collector bot started ===")
     rules = load_config('quality_rules.json')
     sources_cfg = load_config('sources.json')
     published_titles = load_published_titles()
     min_score = rules.get('min_score', 70)
 
-    # 수집
+    # Collect from all sources
     all_items = []
     all_items += collect_google_trends()
     all_items += collect_github_trending(sources_cfg)
@@ -427,7 +455,7 @@ def run():
     all_items += collect_hacker_news(sources_cfg)
     all_items += collect_rss_feeds(sources_cfg)
 
-    logger.info(f"수집 완료: {len(all_items)}개")
+    logger.info(f"Collection complete: {len(all_items)} items")
 
     passed = []
     discarded_count = 0
@@ -436,42 +464,42 @@ def run():
         if not item.get('topic'):
             continue
 
-        # 신뢰도 오버라이드 (RSS 피드별 설정)
+        # Trust level override (per RSS feed config)
         trust_override = item.pop('_trust_override', None)
         if trust_override:
             trust_levels = rules['scoring']['source_trust']['levels']
             item['source_trust_level'] = trust_override
             item['_trust_score'] = trust_levels.get(trust_override, trust_levels['medium'])
 
-        # 품질 점수 계산
+        # Calculate quality score
         score = calculate_quality_score(item, rules)
         item['quality_score'] = score
 
-        # 폐기 규칙 검사
+        # Apply discard rules
         discard_reason = apply_discard_rules(item, rules, published_titles)
         if discard_reason:
             save_discarded(item, discard_reason)
             discarded_count += 1
-            logger.debug(f"폐기: [{score}점] {item['topic']} — {discard_reason}")
+            logger.debug(f"Discarded: [{score}pts] {item['topic']} -- {discard_reason}")
             continue
 
         if score < min_score:
-            save_discarded(item, f'품질 점수 미달 ({score}점 < {min_score}점)')
+            save_discarded(item, f'Quality score too low ({score}pts < {min_score}pts)')
             discarded_count += 1
-            logger.debug(f"폐기: [{score}점] {item['topic']}")
+            logger.debug(f"Discarded: [{score}pts] {item['topic']}")
             continue
 
-        # 코너 배정
+        # Assign corner
         topic_type = item.get('topic_type', 'trending')
         corner = assign_corner(item, topic_type)
         item['corner'] = corner
 
-        # 쿠팡 키워드 추출
-        item['coupang_keywords'] = extract_coupang_keywords(
+        # Extract affiliate keywords
+        item['affiliate_keywords'] = extract_affiliate_keywords(
             item.get('topic', ''), item.get('description', '')
         )
 
-        # 트렌딩 경과 시간 표시
+        # Trending age display
         pub_at_str = item.get('published_at')
         if pub_at_str:
             try:
@@ -479,34 +507,34 @@ def run():
                 if pub_at.tzinfo is None:
                     pub_at = pub_at.replace(tzinfo=timezone.utc)
                 hours_ago = int((datetime.now(timezone.utc) - pub_at).total_seconds() / 3600)
-                item['trending_since'] = f'{hours_ago}시간 전' if hours_ago < 24 else f'{hours_ago // 24}일 전'
+                item['trending_since'] = f'{hours_ago}h ago' if hours_ago < 24 else f'{hours_ago // 24}d ago'
             except Exception:
-                item['trending_since'] = '알 수 없음'
+                item['trending_since'] = 'unknown'
 
-        # sources 필드 정리
+        # Clean up sources field
         item['sources'] = [{'url': item.get('source_url', ''), 'title': item.get('topic', ''),
                              'date': item.get('published_at', '')}]
         item['related_keywords'] = item.get('topic', '').split()[:5]
 
         passed.append(item)
 
-    # 에버그린/트렌드/개성 비율 맞추기
+    # Balance evergreen/trending/personality ratio
     total_target = len(passed)
     evergreen = [i for i in passed if i.get('is_evergreen')]
     trending = [i for i in passed if not i.get('is_evergreen') and i.get('topic_type') == 'trending']
     personality = [i for i in passed if i.get('topic_type') == 'personality']
 
     logger.info(
-        f"합격: {len(passed)}개 (에버그린 {len(evergreen)}, 트렌드 {len(trending)}, "
-        f"개성 {len(personality)}) / 폐기: {discarded_count}개"
+        f"Passed: {len(passed)} items (evergreen {len(evergreen)}, trending {len(trending)}, "
+        f"personality {len(personality)}) / Discarded: {discarded_count} items"
     )
 
-    # 글감 저장
+    # Save topics
     for item in passed:
         save_topic(item)
-        logger.info(f"[{item['quality_score']}점][{item['corner']}] {item['topic']}")
+        logger.info(f"[{item['quality_score']}pts][{item['corner']}] {item['topic']}")
 
-    logger.info("=== 수집봇 완료 ===")
+    logger.info("=== Collector bot finished ===")
     return passed
 
 

@@ -1,14 +1,14 @@
 """
-발행봇 (publisher_bot.py)
-역할: AI가 작성한 글을 Blogger에 자동 발행
-- 마크다운 → HTML 변환
-- 목차 자동 생성
-- AdSense 플레이스홀더 삽입
+Publisher Bot (publisher_bot.py)
+Role: Automatically publish AI-written articles to Blogger
+- Markdown to HTML conversion
+- Auto-generate table of contents
+- Insert AdSense placeholders
 - Schema.org Article JSON-LD
-- 안전장치 (팩트체크/위험 키워드/출처 부족 → 수동 검토)
-- Blogger API v3 발행
-- Search Console URL 제출
-- Telegram 알림
+- Safety checks (FactCheck / risky keywords / insufficient sources -> manual review)
+- Blogger API v3 publishing
+- Search Console URL submission
+- Telegram notifications
 """
 import json
 import logging
@@ -59,7 +59,7 @@ def load_config(filename: str) -> dict:
         return json.load(f)
 
 
-# ─── Google 인증 ─────────────────────────────────────
+# --- Google Authentication ----------------------------------------
 
 def get_google_credentials() -> Credentials:
     creds = None
@@ -71,15 +71,15 @@ def get_google_credentials() -> Credentials:
             with open(TOKEN_PATH, 'w') as f:
                 f.write(creds.to_json())
     if not creds or not creds.valid:
-        raise RuntimeError("Google 인증 실패. scripts/get_token.py 를 먼저 실행하세요.")
+        raise RuntimeError("Google authentication failed. Please run scripts/get_token.py first.")
     return creds
 
 
-# ─── 안전장치 ─────────────────────────────────────────
+# --- Safety Checks ------------------------------------------------
 
 def check_safety(article: dict, safety_cfg: dict) -> tuple[bool, str]:
     """
-    수동 검토가 필요한지 판단.
+    Determine whether manual review is required.
     Returns: (needs_review, reason)
     """
     corner = article.get('corner', '')
@@ -87,12 +87,12 @@ def check_safety(article: dict, safety_cfg: dict) -> tuple[bool, str]:
     sources = article.get('sources', [])
     quality_score = article.get('quality_score', 100)
 
-    # 팩트체크 코너는 무조건 수동 검토
-    manual_corners = safety_cfg.get('always_manual_review', ['팩트체크'])
+    # FactCheck corner always requires manual review
+    manual_corners = safety_cfg.get('always_manual_review', ['FactCheck'])
     if corner in manual_corners:
-        return True, f'코너 "{corner}" 는 항상 수동 검토 필요'
+        return True, f'Corner "{corner}" always requires manual review'
 
-    # 위험 키워드 감지
+    # Risky keyword detection
     all_keywords = (
         safety_cfg.get('crypto_keywords', []) +
         safety_cfg.get('criticism_keywords', []) +
@@ -101,56 +101,56 @@ def check_safety(article: dict, safety_cfg: dict) -> tuple[bool, str]:
     )
     for kw in all_keywords:
         if kw in body:
-            return True, f'위험 키워드 감지: "{kw}"'
+            return True, f'Risky keyword detected: "{kw}"'
 
-    # 출처 2개 미만
+    # Fewer than minimum sources
     min_sources = safety_cfg.get('min_sources_required', 2)
     if len(sources) < min_sources:
-        return True, f'출처 {len(sources)}개 — {min_sources}개 이상 필요'
+        return True, f'Sources: {len(sources)} — at least {min_sources} required'
 
-    # 품질 점수 미달
+    # Quality score below threshold
     min_score = safety_cfg.get('min_quality_score_for_auto', 75)
     if quality_score < min_score:
-        return True, f'품질 점수 {quality_score}점 (자동 발행 최소: {min_score}점)'
+        return True, f'Quality score {quality_score} (minimum for auto-publish: {min_score})'
 
     return False, ''
 
 
-# ─── HTML 변환 ─────────────────────────────────────────
+# --- HTML Conversion -----------------------------------------------
 
 def markdown_to_html(md_text: str) -> str:
-    """마크다운 → HTML 변환 (목차 extension 포함)"""
+    """Markdown to HTML conversion (with table of contents extension)"""
     md = markdown.Markdown(
         extensions=['toc', 'tables', 'fenced_code', 'attr_list'],
         extension_configs={
             'toc': {
-                'title': '목차',
+                'title': 'Table of Contents',
                 'toc_depth': '2-3',
             }
         }
     )
     html = md.convert(md_text)
-    toc = md.toc  # 목차 HTML
+    toc = md.toc  # Table of contents HTML
     return html, toc
 
 
 def insert_adsense_placeholders(html: str) -> str:
-    """두 번째 H2 뒤와 결론 섹션 앞에 AdSense 플레이스홀더 삽입"""
+    """Insert AdSense placeholders after the second H2 and before the conclusion section"""
     AD_SLOT_1 = '\n<!-- AD_SLOT_1 -->\n'
     AD_SLOT_2 = '\n<!-- AD_SLOT_2 -->\n'
 
     soup = BeautifulSoup(html, 'lxml')
     h2_tags = soup.find_all('h2')
 
-    # 두 번째 H2 뒤에 AD_SLOT_1 삽입
+    # Insert AD_SLOT_1 after the second H2
     if len(h2_tags) >= 2:
         second_h2 = h2_tags[1]
         ad_tag = BeautifulSoup(AD_SLOT_1, 'html.parser')
         second_h2.insert_after(ad_tag)
 
-    # 결론 H2 앞에 AD_SLOT_2 삽입
+    # Insert AD_SLOT_2 before the conclusion H2
     for h2 in soup.find_all('h2'):
-        if any(kw in h2.get_text() for kw in ['결론', '마무리', '정리', '요약', 'conclusion']):
+        if any(kw in h2.get_text() for kw in ['conclusion', 'summary', 'wrap-up', 'final thoughts', 'key takeaways']):
             ad_tag2 = BeautifulSoup(AD_SLOT_2, 'html.parser')
             h2.insert_before(ad_tag2)
             break
@@ -159,7 +159,7 @@ def insert_adsense_placeholders(html: str) -> str:
 
 
 def build_json_ld(article: dict, blog_url: str = '') -> str:
-    """Schema.org Article JSON-LD 생성"""
+    """Generate Schema.org Article JSON-LD"""
     schema = {
         "@context": "https://schema.org",
         "@type": "Article",
@@ -169,11 +169,11 @@ def build_json_ld(article: dict, blog_url: str = '') -> str:
         "dateModified": datetime.now(timezone.utc).isoformat(),
         "author": {
             "@type": "Person",
-            "name": "테크인사이더"
+            "name": "TechPulse Daily"
         },
         "publisher": {
             "@type": "Organization",
-            "name": "테크인사이더",
+            "name": "TechPulse Daily",
             "logo": {
                 "@type": "ImageObject",
                 "url": ""
@@ -188,7 +188,7 @@ def build_json_ld(article: dict, blog_url: str = '') -> str:
 
 
 def build_full_html(article: dict, body_html: str, toc_html: str) -> str:
-    """최종 HTML 조합: JSON-LD + 목차 + 본문 + 면책 문구"""
+    """Assemble final HTML: JSON-LD + table of contents + body + disclaimer"""
     json_ld = build_json_ld(article)
     disclaimer = article.get('disclaimer', '')
 
@@ -202,10 +202,10 @@ def build_full_html(article: dict, body_html: str, toc_html: str) -> str:
     return '\n'.join(html_parts)
 
 
-# ─── Blogger API ──────────────────────────────────────
+# --- Blogger API ---------------------------------------------------
 
 def publish_to_blogger(article: dict, html_content: str, creds: Credentials) -> dict:
-    """Blogger API v3로 글 발행"""
+    """Publish article via Blogger API v3"""
     service = build('blogger', 'v3', credentials=creds)
     blog_id = BLOG_MAIN_ID
 
@@ -232,24 +232,24 @@ def publish_to_blogger(article: dict, html_content: str, creds: Credentials) -> 
 
 
 def submit_to_search_console(url: str, creds: Credentials):
-    """Google Search Console URL 색인 요청"""
+    """Submit URL to Google Search Console for indexing"""
     try:
         service = build('searchconsole', 'v1', credentials=creds)
-        # URL Inspection API (실제 indexing 요청)
-        # 참고: 일반적으로 Blogger sitemap이 자동 제출되므로 보조 수단
-        logger.info(f"Search Console 제출: {url}")
-        # indexing API는 별도 서비스 계정 필요. 여기서는 로그만 남김.
-        # 실제 색인 촉진은 Blogger 내장 sitemap에 의존
+        # URL Inspection API (actual indexing request)
+        # Note: Blogger sitemap is typically auto-submitted, so this is supplementary
+        logger.info(f"Search Console submission: {url}")
+        # Indexing API requires a separate service account. Only logging here.
+        # Actual index acceleration relies on Blogger's built-in sitemap
     except Exception as e:
-        logger.warning(f"Search Console 제출 실패: {e}")
+        logger.warning(f"Search Console submission failed: {e}")
 
 
-# ─── Telegram ────────────────────────────────────────
+# --- Telegram -----------------------------------------------------
 
 def send_telegram(text: str, parse_mode: str = 'HTML'):
-    """Telegram 메시지 전송"""
+    """Send Telegram message"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.warning("Telegram 설정 없음 — 알림 건너뜀")
+        logger.warning("Telegram not configured — skipping notification")
         return
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
     payload = {
@@ -261,29 +261,29 @@ def send_telegram(text: str, parse_mode: str = 'HTML'):
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
     except Exception as e:
-        logger.error(f"Telegram 전송 실패: {e}")
+        logger.error(f"Telegram send failed: {e}")
 
 
 def send_pending_review_alert(article: dict, reason: str):
-    """수동 검토 대기 알림 (Telegram)"""
-    title = article.get('title', '(제목 없음)')
+    """Send manual review pending alert (Telegram)"""
+    title = article.get('title', '(No title)')
     corner = article.get('corner', '')
     preview = article.get('body', '')[:300].replace('<', '&lt;').replace('>', '&gt;')
     msg = (
-        f"🔍 <b>[수동 검토 필요]</b>\n\n"
+        f"🔍 <b>[Manual Review Required]</b>\n\n"
         f"📌 <b>{title}</b>\n"
-        f"코너: {corner}\n"
-        f"사유: {reason}\n\n"
-        f"미리보기:\n{preview}...\n\n"
-        f"명령: <code>승인</code> 또는 <code>거부</code>"
+        f"Corner: {corner}\n"
+        f"Reason: {reason}\n\n"
+        f"Preview:\n{preview}...\n\n"
+        f"Command: <code>approve</code> or <code>reject</code>"
     )
     send_telegram(msg)
 
 
-# ─── 발행 이력 ───────────────────────────────────────
+# --- Publish History -----------------------------------------------
 
 def log_published(article: dict, post_result: dict):
-    """발행 이력 저장"""
+    """Save publish history"""
     published_dir = DATA_DIR / 'published'
     published_dir.mkdir(exist_ok=True)
     record = {
@@ -303,7 +303,7 @@ def log_published(article: dict, post_result: dict):
 
 
 def save_pending_review(article: dict, reason: str):
-    """수동 검토 대기 글 저장"""
+    """Save article pending manual review"""
     pending_dir = DATA_DIR / 'pending_review'
     pending_dir.mkdir(exist_ok=True)
     record = {**article, 'pending_reason': reason, 'created_at': datetime.now().isoformat()}
@@ -318,67 +318,67 @@ def load_pending_review_file(filepath: str) -> dict:
         return json.load(f)
 
 
-# ─── 메인 발행 함수 ──────────────────────────────────
+# --- Main Publish Function -----------------------------------------
 
 def publish(article: dict) -> bool:
     """
-    article: OpenClaw blog-writer가 출력한 파싱된 글 dict
+    article: Parsed article dict output by OpenClaw blog-writer
     {
         title, meta, slug, tags, corner, body (markdown),
         coupang_keywords, sources, disclaimer, quality_score
     }
-    Returns: True(발행 성공) / False(수동 검토 대기)
+    Returns: True (published successfully) / False (pending manual review)
     """
-    logger.info(f"발행 시도: {article.get('title', '')}")
+    logger.info(f"Attempting to publish: {article.get('title', '')}")
     safety_cfg = load_config('safety_keywords.json')
 
-    # 안전장치 검사
+    # Safety check
     needs_review, review_reason = check_safety(article, safety_cfg)
     if needs_review:
-        logger.warning(f"수동 검토 대기: {review_reason}")
+        logger.warning(f"Pending manual review: {review_reason}")
         save_pending_review(article, review_reason)
         send_pending_review_alert(article, review_reason)
         return False
 
-    # 마크다운 → HTML
+    # Markdown to HTML
     body_html, toc_html = markdown_to_html(article.get('body', ''))
 
-    # AdSense 플레이스홀더
+    # AdSense placeholders
     body_html = insert_adsense_placeholders(body_html)
 
-    # 최종 HTML 조합
+    # Assemble final HTML
     full_html = build_full_html(article, body_html, toc_html)
 
-    # Google 인증
+    # Google authentication
     try:
         creds = get_google_credentials()
     except RuntimeError as e:
         logger.error(str(e))
         return False
 
-    # Blogger 발행
+    # Publish to Blogger
     try:
         post_result = publish_to_blogger(article, full_html, creds)
         post_url = post_result.get('url', '')
-        logger.info(f"발행 완료: {post_url}")
+        logger.info(f"Published successfully: {post_url}")
     except Exception as e:
-        logger.error(f"Blogger 발행 실패: {e}")
+        logger.error(f"Blogger publish failed: {e}")
         return False
 
-    # Search Console 제출
+    # Submit to Search Console
     if post_url:
         submit_to_search_console(post_url, creds)
 
-    # 발행 이력 저장
+    # Save publish history
     log_published(article, post_result)
 
-    # Telegram 알림
+    # Telegram notification
     title = article.get('title', '')
     corner = article.get('corner', '')
     send_telegram(
-        f"✅ <b>발행 완료!</b>\n\n"
+        f"✅ <b>Published successfully!</b>\n\n"
         f"📌 <b>{title}</b>\n"
-        f"코너: {corner}\n"
+        f"Corner: {corner}\n"
         f"URL: {post_url}"
     )
 
@@ -386,13 +386,13 @@ def publish(article: dict) -> bool:
 
 
 def approve_pending(filepath: str) -> bool:
-    """수동 검토 대기 글 승인 후 발행"""
+    """Approve and publish a manually reviewed article"""
     try:
         article = load_pending_review_file(filepath)
         article.pop('pending_reason', None)
         article.pop('created_at', None)
 
-        # 안전장치 우회하여 강제 발행
+        # Force publish bypassing safety checks
         body_html, toc_html = markdown_to_html(article.get('body', ''))
         body_html = insert_adsense_placeholders(body_html)
         full_html = build_full_html(article, body_html, toc_html)
@@ -402,34 +402,34 @@ def approve_pending(filepath: str) -> bool:
         post_url = post_result.get('url', '')
         log_published(article, post_result)
 
-        # 대기 파일 삭제
+        # Delete pending file
         Path(filepath).unlink(missing_ok=True)
 
         send_telegram(
-            f"✅ <b>[수동 승인] 발행 완료!</b>\n\n"
+            f"✅ <b>[Manual Approval] Published successfully!</b>\n\n"
             f"📌 {article.get('title', '')}\n"
             f"URL: {post_url}"
         )
-        logger.info(f"수동 승인 발행 완료: {post_url}")
+        logger.info(f"Manual approval published: {post_url}")
         return True
     except Exception as e:
-        logger.error(f"승인 발행 실패: {e}")
+        logger.error(f"Approval publish failed: {e}")
         return False
 
 
 def reject_pending(filepath: str):
-    """수동 검토 대기 글 거부 (파일 삭제)"""
+    """Reject a manually reviewed article (delete file)"""
     try:
         article = load_pending_review_file(filepath)
         Path(filepath).unlink(missing_ok=True)
-        send_telegram(f"🗑 <b>[거부]</b> {article.get('title', '')} — 폐기됨")
-        logger.info(f"수동 검토 거부: {filepath}")
+        send_telegram(f"🗑 <b>[Rejected]</b> {article.get('title', '')} — discarded")
+        logger.info(f"Manual review rejected: {filepath}")
     except Exception as e:
-        logger.error(f"거부 처리 실패: {e}")
+        logger.error(f"Rejection processing failed: {e}")
 
 
 def get_pending_list() -> list[dict]:
-    """수동 검토 대기 목록 반환"""
+    """Return list of articles pending manual review"""
     pending_dir = DATA_DIR / 'pending_review'
     pending_dir.mkdir(exist_ok=True)
     result = []
@@ -444,21 +444,21 @@ def get_pending_list() -> list[dict]:
 
 
 if __name__ == '__main__':
-    # 테스트용: 샘플 아티클 발행 시도
+    # Test: attempt to publish a sample article
     sample = {
-        'title': '테스트 글',
-        'meta': '테스트 메타 설명',
+        'title': 'Test Article',
+        'meta': 'Test meta description',
         'slug': 'test-article',
-        'tags': ['테스트', 'AI'],
-        'corner': '쉬운세상',
-        'body': '## 제목\n\n본문 내용입니다.\n\n## 결론\n\n마무리입니다.',
-        'coupang_keywords': ['키보드'],
+        'tags': ['test', 'AI'],
+        'corner': 'EasyWorld',
+        'body': '## Title\n\nBody content here.\n\n## Conclusion\n\nWrapping up.',
+        'coupang_keywords': ['keyboard'],
         'sources': [
-            {'url': 'https://example.com/1', 'title': '출처1', 'date': '2026-03-24'},
-            {'url': 'https://example.com/2', 'title': '출처2', 'date': '2026-03-24'},
+            {'url': 'https://example.com/1', 'title': 'Source 1', 'date': '2026-03-24'},
+            {'url': 'https://example.com/2', 'title': 'Source 2', 'date': '2026-03-24'},
         ],
         'disclaimer': '',
         'quality_score': 80,
     }
     result = publish(sample)
-    print('발행 결과:', result)
+    print('Publish result:', result)
